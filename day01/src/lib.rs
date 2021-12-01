@@ -11,8 +11,15 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn part2(_input: &Path) -> Result<(), Error> {
-    unimplemented!()
+pub fn part2(input: &Path) -> Result<(), Error> {
+    let increases = parse::<u32>(input)?
+        .tuple_windows::<(_, _, _)>()
+        .map(|(a, b, c)| a + b + c)
+        .tuple_windows::<(_, _)>()
+        .filter(|(a, b)| b > a)
+        .count();
+    println!("increases (3-windows): {}", increases);
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
