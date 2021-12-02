@@ -1,5 +1,4 @@
-use aoclib::geometry::Point;
-use aoclib::parse;
+use aoclib::{geometry::Point, parse};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq, parse_display::Display, parse_display::FromStr)]
