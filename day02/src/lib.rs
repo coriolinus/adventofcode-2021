@@ -27,14 +27,30 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn part2(_input: &Path) -> Result<(), Error> {
-    unimplemented!()
+pub fn part2(input: &Path) -> Result<(), Error> {
+    let (final_position, _) = parse::<Command>(input)?.fold(
+        (Point::default(), 0_i32),
+        |(mut position, mut aim), command| {
+            match command {
+                Command::Forward(x) => {
+                    position.x += x;
+                    position.y += aim * x;
+                }
+                Command::Down(y) => aim += y,
+                Command::Up(y) => aim -= y,
+            }
+            (position, aim)
+        },
+    );
+    println!(
+        "product of horizontal position and depth (with aim): {}",
+        final_position.x * final_position.y
+    );
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("No solution found")]
-    NoSolution,
 }
