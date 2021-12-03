@@ -1,5 +1,5 @@
 use aoclib::parse;
-use std::{path::Path, str::FromStr};
+use std::{cmp::Ordering, path::Path, str::FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct DiagnosticCondition {
@@ -51,7 +51,45 @@ fn find_rates(report: &[DiagnosticCondition]) -> (u16, u16) {
     (gamma, epsilon)
 }
 
-// known wrong: 16449928
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LifeSupport {
+    OxygenGenerator,
+    Co2Scrubber,
+}
+
+fn locate_rating(report: &[DiagnosticCondition], rating_type: LifeSupport) -> Result<u16, Error> {
+    let max_width = report
+        .iter()
+        .map(|condition| condition.width)
+        .max()
+        .ok_or(Error::NoSolution)?;
+
+    let mut possible_values: Vec<_> = report.iter().map(|condition| condition.value).collect();
+
+    for position in (0..max_width).rev() {
+        let ones = possible_values
+            .iter()
+            .filter(|value| *value & 1 << position != 0)
+            .count();
+        let zeros = possible_values.len() - ones;
+        let desired_value = match (rating_type, zeros.cmp(&ones)) {
+            (LifeSupport::OxygenGenerator, Ordering::Less | Ordering::Equal) => 1,
+            (LifeSupport::OxygenGenerator, Ordering::Greater) => 0,
+            (LifeSupport::Co2Scrubber, Ordering::Less | Ordering::Equal) => 0,
+            (LifeSupport::Co2Scrubber, Ordering::Greater) => 1,
+        };
+
+        possible_values.retain(|value| value & 1 << position == desired_value << position);
+        if possible_values.is_empty() {
+            return Err(Error::NoSolution);
+        }
+        if possible_values.len() == 1 {
+            return Ok(possible_values[0]);
+        }
+    }
+    return Err(Error::NoSolution);
+}
+
 pub fn part1(input: &Path) -> Result<(), Error> {
     let diagnostic_report: Vec<DiagnosticCondition> = parse(input)?.collect();
     let (gamma, epsilon) = find_rates(&diagnostic_report);
@@ -59,8 +97,15 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn part2(_input: &Path) -> Result<(), Error> {
-    unimplemented!()
+pub fn part2(input: &Path) -> Result<(), Error> {
+    let diagnostic_report: Vec<DiagnosticCondition> = parse(input)?.collect();
+    let oxygen_generator_rating = locate_rating(&diagnostic_report, LifeSupport::OxygenGenerator)?;
+    let co2_scrubber_rating = locate_rating(&diagnostic_report, LifeSupport::Co2Scrubber)?;
+    println!(
+        "life support rating: {}",
+        oxygen_generator_rating as u32 * co2_scrubber_rating as u32
+    );
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
