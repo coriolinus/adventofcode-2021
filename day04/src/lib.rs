@@ -1,9 +1,6 @@
 pub mod two_phase;
 
-use aoclib::{
-    geometry::{tile::DisplayWidth, Direction, Map},
-    CommaSep,
-};
+use aoclib::geometry::{tile::DisplayWidth, Direction, Map};
 use std::{fmt::Display, path::Path, str::FromStr};
 use two_phase::{parse_two_phase, TrimmedCommaSep};
 
@@ -31,10 +28,6 @@ impl Tile {
 
     fn mark(&mut self) {
         self.0 |= HIGH_BIT
-    }
-
-    fn unmark(&mut self) {
-        self.0 &= LOW_BITS
     }
 }
 
