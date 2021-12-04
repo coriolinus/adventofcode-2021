@@ -42,11 +42,14 @@ impl DisplayWidth for Tile {
 }
 
 /// Implementation of a bingo board.
-struct Bingo(Map<Tile>);
+struct Bingo {
+    tiles: Map<Tile>,
+    has_won: bool,
+}
 
 impl Bingo {
     fn call(&mut self, value: u8) {
-        for (_, tile) in self.0.iter_mut() {
+        for (_, tile) in self.tiles.iter_mut() {
             if tile.value() == value {
                 tile.mark();
             }
@@ -55,20 +58,24 @@ impl Bingo {
 
     /// `true` when the board contains at least one marked row of bingos.
     fn check_bingo(&self) -> bool {
+        if self.has_won {
+            return true;
+        }
+
         let (dx, dy) = Direction::Up.deltas();
-        let left_edge = self.0.project(self.0.bottom_left(), dx, dy);
+        let left_edge = self.tiles.project(self.tiles.bottom_left(), dx, dy);
         let (dx, dy) = Direction::Right.deltas();
-        let horizontal_rows = left_edge.map(|left| self.0.project(left, dx, dy));
-        let bottom_edge = self.0.project(self.0.bottom_left(), dx, dy);
+        let horizontal_rows = left_edge.map(|left| self.tiles.project(left, dx, dy));
+        let bottom_edge = self.tiles.project(self.tiles.bottom_left(), dx, dy);
         let (dx, dy) = Direction::Up.deltas();
-        let vertical_rows = bottom_edge.map(|bottom| self.0.project(bottom, dx, dy));
+        let vertical_rows = bottom_edge.map(|bottom| self.tiles.project(bottom, dx, dy));
         let mut rows = horizontal_rows.chain(vertical_rows);
 
-        rows.any(|mut row| row.all(|tile| self.0[tile].is_marked()))
+        rows.any(|mut row| row.all(|tile| self.tiles[tile].is_marked()))
     }
 
     fn sum_unmarked(&self) -> u32 {
-        self.0
+        self.tiles
             .iter()
             .filter_map(|(_, tile)| (!tile.is_marked()).then(|| tile.value() as u32))
             .sum()
@@ -104,7 +111,10 @@ impl FromStr for Bingo {
             y -= 1;
         }
 
-        Ok(Bingo(map))
+        Ok(Bingo {
+            tiles: map,
+            has_won: false,
+        })
     }
 }
 
@@ -117,7 +127,10 @@ pub fn part1(input: &Path) -> Result<(), Error> {
         for board in boards.iter_mut() {
             board.call(call);
             if board.check_bingo() {
-                println!("winning score: {}", board.sum_unmarked() * call as u32);
+                println!(
+                    "winning score (first): {}",
+                    board.sum_unmarked() * call as u32
+                );
                 return Ok(());
             }
         }
@@ -126,8 +139,30 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Err(Error::NoSolution)
 }
 
-pub fn part2(_input: &Path) -> Result<(), Error> {
-    unimplemented!()
+pub fn part2(input: &Path) -> Result<(), Error> {
+    let (calls, boards) = parse_two_phase::<TrimmedCommaSep<u8>, Bingo>(input)?;
+    let calls: Vec<_> = calls.into();
+    let mut boards: Vec<_> = boards.collect();
+    let mut boards_remaining = boards.len();
+
+    for call in calls {
+        for board in boards.iter_mut() {
+            board.call(call);
+            if board.check_bingo() && !board.has_won {
+                boards_remaining -= 1;
+                board.has_won = true;
+            }
+            if boards_remaining == 0 {
+                println!(
+                    "winning score (last):  {}",
+                    board.sum_unmarked() * call as u32
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    Err(Error::NoSolution)
 }
 
 #[derive(Debug, thiserror::Error)]
