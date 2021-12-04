@@ -1,8 +1,8 @@
-pub mod two_phase;
-
-use aoclib::geometry::{tile::DisplayWidth, Direction, Map};
+use aoclib::{
+    geometry::{tile::DisplayWidth, Direction, Map},
+    input::{parse_two_phase, TrimmedCommaSep, TwoPhaseError},
+};
 use std::{fmt::Display, path::Path, str::FromStr};
-use two_phase::{parse_two_phase, TrimmedCommaSep};
 
 const HIGH_BIT: u8 = 0x80;
 const LOW_BITS: u8 = !HIGH_BIT;
@@ -168,7 +168,7 @@ pub fn part2(input: &Path) -> Result<(), Error> {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Io(#[from] two_phase::TwoPhaseError),
+    Io(#[from] TwoPhaseError),
     #[error("no solution found")]
     NoSolution,
     #[error("bad board")]
