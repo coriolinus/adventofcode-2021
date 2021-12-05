@@ -25,37 +25,32 @@ impl From<VentLine> for Line {
     }
 }
 
-fn is_horizontal_or_vertical(line: Line) -> bool {
+fn is_horizontal_or_vertical(line: &Line) -> bool {
     line.from.x == line.to.x || line.from.y == line.to.y
 }
 
 /// Iterate over the points of the line, inclusive.
 ///
-/// Only works for horizontal or vertical lines.
+/// Only works for horizontal, vertical, or perfect diagonal lines.
+/// Other angles will cause infinite incorrect iteration.
 ///
 /// Consider adding this to aoclib.
-fn line_points<'a>(line: Line) -> Option<impl Iterator<Item = Point>> {
-    if !is_horizontal_or_vertical(line) {
-        return None;
-    }
-
+fn line_points<'a>(line: Line) -> impl Iterator<Item = Point> {
     let vector = line.to - line.from;
     let dx = vector.x / vector.x.abs().max(1);
     let dy = vector.y / vector.y.abs().max(1);
 
-    Some(
-        std::iter::successors(Some(line.from), move |prev| {
-            if *prev == line.to {
-                None
-            } else {
-                let mut next = *prev;
-                next.x += dx;
-                next.y += dy;
-                Some(next)
-            }
-        })
-        .fuse(),
-    )
+    std::iter::successors(Some(line.from), move |prev| {
+        if *prev == line.to {
+            None
+        } else {
+            let mut next = *prev;
+            next.x += dx;
+            next.y += dy;
+            Some(next)
+        }
+    })
+    .fuse()
 }
 
 type Map = aoclib::geometry::Map<u8>;
@@ -64,7 +59,8 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     let mut map = Map::new(MAP_EDGE, MAP_EDGE);
     for point in parse::<VentLine>(input)?
         .map(Into::into)
-        .filter_map(line_points)
+        .filter(is_horizontal_or_vertical)
+        .map(line_points)
         .flatten()
     {
         map[point] += 1;
@@ -72,13 +68,29 @@ pub fn part1(input: &Path) -> Result<(), Error> {
 
     let intersections_count = map.iter().filter(|(_, count)| **count > 1).count();
 
-    println!("count of intersections: {}", intersections_count);
+    println!(
+        "count of intersections (horiz or vert): {}",
+        intersections_count
+    );
 
     Ok(())
 }
 
-pub fn part2(_input: &Path) -> Result<(), Error> {
-    unimplemented!()
+pub fn part2(input: &Path) -> Result<(), Error> {
+    let mut map = Map::new(MAP_EDGE, MAP_EDGE);
+    for point in parse::<VentLine>(input)?
+        .map(Into::into)
+        .map(line_points)
+        .flatten()
+    {
+        map[point] += 1;
+    }
+
+    let intersections_count = map.iter().filter(|(_, count)| **count > 1).count();
+
+    println!("count of intersections (all): {}", intersections_count);
+
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
