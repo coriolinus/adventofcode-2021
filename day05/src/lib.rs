@@ -97,6 +97,4 @@ pub fn part2(input: &Path) -> Result<(), Error> {
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("No solution found")]
-    NoSolution,
 }
