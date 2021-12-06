@@ -22,7 +22,7 @@ struct RunArgs {
     #[structopt(long)]
     part2: bool,
 
-    // how many days to run
+    /// how many days to run (part 1 only)
     #[structopt(short, long, default_value = "80")]
     days: usize,
 }
@@ -51,7 +51,7 @@ fn main() -> Result<()> {
         part1(&input_path, args.days)?;
     }
     if args.part2 {
-        part2(&input_path, args.days)?;
+        part2(&input_path)?;
     }
     Ok(())
 }

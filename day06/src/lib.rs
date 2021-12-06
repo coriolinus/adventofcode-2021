@@ -69,8 +69,8 @@ pub fn part1(input: &Path, days: usize) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn part2(input: &Path, days: usize) -> Result<(), Error> {
-    unimplemented!()
+pub fn part2(input: &Path) -> Result<(), Error> {
+    part1(input, 256)
 }
 
 #[derive(Debug, thiserror::Error)]
