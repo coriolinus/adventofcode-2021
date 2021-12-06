@@ -79,6 +79,4 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Fish is too old (line {0})")]
     ElderFish(usize),
-    #[error("No solution found")]
-    NoSolution,
 }
