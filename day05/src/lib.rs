@@ -35,7 +35,7 @@ fn is_horizontal_or_vertical(line: &Line) -> bool {
 /// Other angles will cause infinite incorrect iteration.
 ///
 /// Consider adding this to aoclib.
-fn line_points<'a>(line: Line) -> impl Iterator<Item = Point> {
+fn line_points(line: Line) -> impl Iterator<Item = Point> {
     let vector = line.to - line.from;
     let dx = vector.x / vector.x.abs().max(1);
     let dy = vector.y / vector.y.abs().max(1);

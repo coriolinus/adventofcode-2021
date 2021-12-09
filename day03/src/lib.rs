@@ -28,6 +28,8 @@ fn find_rates(report: &[DiagnosticCondition]) -> (u16, u16) {
     let mut max_width = 0;
 
     for condition in report.iter() {
+        // We use `position` within this loop as a value, not just as an index
+        #[allow(clippy::needless_range_loop)]
         for position in 0..16 {
             if condition.value & 1 << position != 0 {
                 counts[position] += 1;
@@ -37,6 +39,9 @@ fn find_rates(report: &[DiagnosticCondition]) -> (u16, u16) {
     }
 
     let mut gamma = 0;
+
+    // We use `position` within this loop as a value, not just as an index
+    #[allow(clippy::needless_range_loop)]
     for position in 0..16 {
         if counts[position] > threshold {
             gamma |= 1 << position;
@@ -87,7 +92,7 @@ fn locate_rating(report: &[DiagnosticCondition], rating_type: LifeSupport) -> Re
             return Ok(possible_values[0]);
         }
     }
-    return Err(Error::NoSolution);
+    Err(Error::NoSolution)
 }
 
 pub fn part1(input: &Path) -> Result<(), Error> {

@@ -128,6 +128,9 @@ impl Entry {
         // numbers.
         let mut appearance_counts = [0_u8; 7];
         for pattern in self.signal_patterns.iter() {
+            // we use `bit_idx` here as a value, not just for indexing.
+            // reformulating this as an indexed iterator loses clarity.
+            #[allow(clippy::needless_range_loop)]
             for bit_idx in 0..7 {
                 if pattern.0 & 1 << bit_idx != 0 {
                     appearance_counts[bit_idx] += 1;
@@ -249,10 +252,7 @@ impl Entry {
 pub fn part1(input: &Path) -> Result<(), Error> {
     let output_identifiable_digits_count = parse::<Entry>(input)?
         .flat_map(|entry| entry.output_value.into_iter())
-        .filter(|signals| match signals.segment_count() {
-            2 | 3 | 4 | 7 => true,
-            _ => false,
-        })
+        .filter(|signals| matches!(signals.segment_count(), 2 | 3 | 4 | 7))
         .count();
     println!(
         "identifiable output digits: {}",
