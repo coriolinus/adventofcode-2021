@@ -52,13 +52,22 @@ pub fn part1(input: &Path) -> Result<(), Error> {
 }
 
 pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+    let map = <Map<Digit> as TryFrom<&Path>>::try_from(input)?;
+    let mut map: Map<u8> = map.convert_tile_type();
+
+    for step_no in 1.. {
+        let flashes = step(&mut map);
+        if flashes == (map.width() * map.height()) as u64 {
+            println!("first step when all flash together: {}", step_no);
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("no solution found")]
-    NoSolution,
 }
