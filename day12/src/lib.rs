@@ -117,7 +117,7 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// make the reversed path to this location
+/// make the path to this location
 fn make_path(node: &SearchNode) -> Vec<usize> {
     let mut path = match &node.previous {
         None => Vec::new(),
@@ -187,6 +187,4 @@ pub fn part2(input: &Path) -> Result<(), Error> {
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("no solution found")]
-    NoSolution,
 }
