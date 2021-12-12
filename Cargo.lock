@@ -472,6 +472,7 @@ name = "day12"
 version = "0.1.0"
 dependencies = [
  "aoclib",
+ "bitvec",
  "color-eyre",
  "parse-display 0.5.3",
  "structopt",

@@ -1,6 +1,6 @@
 use aoclib::parse;
-use parse_display::FromStr;
-use std::path::Path;
+use bitvec::prelude::*;
+use std::{collections::VecDeque, path::Path};
 
 #[derive(parse_display::FromStr)]
 #[display("{from}-{to}")]
@@ -17,7 +17,14 @@ struct Cave {
 // Edges are a map from every cave (by index) to the indices of every cave directly reachable therefrom.
 type Edges = std::collections::HashMap<usize, Vec<usize>>;
 
-fn parse_input(input: &Path) -> Result<(Vec<Cave>, Edges), Error> {
+/// Parse the input file into four fields:
+///
+/// - a list of caves
+/// - an Edges map of all outgoing nodes from the current node
+/// - a 2-tuple:
+///   - the index of the start cave in the caves list
+///   - the index of the end cave in the caves list
+fn parse_input(input: &Path) -> Result<(Vec<Cave>, Edges, (usize, usize)), Error> {
     let prim_edges: Vec<_> = parse::<PrimitiveEdge>(input)?.collect();
     let mut labels = Vec::with_capacity(prim_edges.len() * 2);
     for pe in prim_edges.iter() {
@@ -50,10 +57,55 @@ fn parse_input(input: &Path) -> Result<(Vec<Cave>, Edges), Error> {
             edges.entry(index_of(from)).or_default().push(index_of(to));
         }
     }
-    Ok((caves, edges))
+
+    let start = index_of("start");
+    let end = index_of("end");
+
+    Ok((caves, edges, (start, end)))
+}
+
+struct SearchNode {
+    location: usize,
+    visited: BitVec,
 }
 
 pub fn part1(input: &Path) -> Result<(), Error> {
+    let (caves, edges, (start, end)) = parse_input(input)?;
+
+    let mut queue = VecDeque::new();
+    queue.push_back(SearchNode {
+        location: start,
+        visited: bitvec![0; caves.len()],
+    });
+
+    let mut paths = 0;
+    while let Some(SearchNode {
+        location,
+        mut visited,
+    }) = queue.pop_front()
+    {
+        visited.set(location, true);
+        if location == end {
+            paths += 1;
+        } else {
+            for next_location in edges
+                .get(&location)
+                .map(|locations| {
+                    Box::new(locations.iter().copied()) as Box<dyn Iterator<Item = usize>>
+                })
+                .unwrap_or(Box::new(std::iter::empty()))
+            {
+                if caves[next_location].is_big || !visited[next_location] {
+                    queue.push_back(SearchNode {
+                        location: next_location,
+                        visited: visited.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    println!("distinct paths through the cave system: {}", paths);
     Ok(())
 }
 
