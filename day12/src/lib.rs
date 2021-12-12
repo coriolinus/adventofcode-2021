@@ -1,6 +1,10 @@
 use aoclib::parse;
 use bitvec::prelude::*;
-use std::{collections::VecDeque, path::Path};
+use std::{
+    collections::{HashSet, VecDeque},
+    path::Path,
+    rc::Rc,
+};
 
 #[derive(parse_display::FromStr)]
 #[display("{from}-{to}")]
@@ -64,6 +68,8 @@ fn parse_input(input: &Path) -> Result<(Vec<Cave>, Edges, (usize, usize)), Error
 struct SearchNode {
     location: usize,
     visited: BitVec,
+    previous: Option<Rc<SearchNode>>,
+    visited_twice: bool,
 }
 
 pub fn part1(input: &Path) -> Result<(), Error> {
@@ -73,12 +79,15 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     queue.push_back(SearchNode {
         location: start,
         visited: bitvec![0; caves.len()],
+        previous: None,
+        visited_twice: false,
     });
 
     let mut paths = 0;
     while let Some(SearchNode {
         location,
         mut visited,
+        ..
     }) = queue.pop_front()
     {
         visited.set(location, true);
@@ -96,6 +105,8 @@ pub fn part1(input: &Path) -> Result<(), Error> {
                     queue.push_back(SearchNode {
                         location: next_location,
                         visited: visited.clone(),
+                        previous: None,
+                        visited_twice: false,
                     });
                 }
             }
@@ -106,8 +117,70 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// make the reversed path to this location
+fn make_path(node: &SearchNode) -> Vec<usize> {
+    let mut path = match &node.previous {
+        None => Vec::new(),
+        Some(prev) => make_path(prev),
+    };
+    path.push(node.location);
+    path
+}
+
 pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+    let (caves, edges, (start, end)) = parse_input(input)?;
+
+    let mut paths = HashSet::new();
+
+    for can_visit_twice in (0..caves.len())
+        .filter(|&cave_idx| !caves[cave_idx].is_big && !(caves[cave_idx].label == "start"))
+    {
+        let mut queue = VecDeque::new();
+        queue.push_back(SearchNode {
+            location: start,
+            visited: bitvec![0; caves.len()],
+            previous: None,
+            visited_twice: false,
+        });
+
+        while let Some(node) = queue.pop_front() {
+            let node = Rc::new(node);
+            let location = node.location;
+            let mut visited = node.visited.clone();
+            visited.set(location, true);
+
+            if location == end {
+                paths.insert(make_path(&node));
+            } else {
+                for next_location in edges
+                    .get(&location)
+                    .map(|locations| {
+                        Box::new(locations.iter().copied()) as Box<dyn Iterator<Item = usize>>
+                    })
+                    .unwrap_or(Box::new(std::iter::empty()))
+                {
+                    if caves[next_location].is_big
+                        || !visited[next_location]
+                        || (next_location == can_visit_twice && !node.visited_twice)
+                    {
+                        queue.push_back(SearchNode {
+                            location: next_location,
+                            visited: visited.clone(),
+                            previous: Some(node.clone()),
+                            visited_twice: node.visited_twice
+                                || next_location == can_visit_twice && visited[next_location],
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    println!(
+        "distinct paths through the cave system visiting 1 small twice: {}",
+        paths.len()
+    );
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
