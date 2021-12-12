@@ -44,11 +44,8 @@ fn parse_input(input: &Path) -> Result<(Vec<Cave>, Edges, (usize, usize)), Error
 
     let index_of = |label: &str| -> usize {
         caves
-            .iter()
-            .enumerate()
-            .find(|(_, cave)| cave.label == label)
+            .binary_search_by_key(&label, |cave| &cave.label)
             .expect("all labels derive from primitive edges")
-            .0
     };
 
     let mut edges = Edges::with_capacity(caves.len());
