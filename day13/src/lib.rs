@@ -1,4 +1,7 @@
-use aoclib::{geometry::Point, parse};
+use aoclib::{
+    geometry::{tile::Bool, Map, Point},
+    parse,
+};
 use std::{cmp::Ordering, collections::HashSet, path::Path};
 
 #[derive(Debug, Clone, Copy, parse_display::FromStr)]
@@ -75,8 +78,40 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+type DisplayBoard = Map<Bool>;
+
 pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+    let (points, folds) = parse_input(input)?;
+    let mut point_collection = HashSet::with_capacity(points.len());
+    for mut point in points {
+        for fold in &folds {
+            point = fold.apply(point);
+        }
+        point_collection.insert(point);
+    }
+
+    // determine the max and min points
+    let mut max = Point::new(i32::MIN, i32::MIN);
+    let mut min = Point::new(i32::MAX, i32::MAX);
+    for point in &point_collection {
+        max.x = max.x.max(point.x);
+        max.y = max.y.max(point.y);
+        min.x = min.x.min(point.x);
+        min.y = min.y.min(point.y);
+    }
+
+    let mut board = DisplayBoard::new_offset(
+        min,
+        (max.x - min.x + 1) as usize,
+        (max.y - min.y + 1) as usize,
+    );
+    for point in point_collection {
+        board[point] = true.into();
+    }
+    board = board.flip_vertical();
+
+    println!("activation code:\n{}", board);
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
