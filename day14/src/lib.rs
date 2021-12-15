@@ -139,9 +139,9 @@ fn parse_input(input: &Path) -> Result<(PairTable, Vec<InsertionRule>), Error> {
     Ok((polymer_template, insertion_rules))
 }
 
-pub fn part1(input: &Path) -> Result<(), Error> {
+fn solve(input: &Path, iterations: u8) -> Result<(), Error> {
     let (mut pair_table, insertion_rules) = parse_input(input)?;
-    for _ in 0..10 {
+    for _ in 0..iterations {
         pair_table = pair_table.apply(&insertion_rules);
     }
     let solution = pair_table.puzzle_solution();
@@ -150,8 +150,12 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+pub fn part1(input: &Path) -> Result<(), Error> {
+    solve(input, 10)
+}
+
 pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+    solve(input, 40)
 }
 
 #[derive(Debug, thiserror::Error)]
