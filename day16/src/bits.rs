@@ -284,7 +284,7 @@ mod tests {
         let packet = Packet::parse_hex("D2FE28").unwrap();
         assert_eq!(packet.header.version, 6);
         assert_eq!(packet.header.type_id, Type::Literal);
-        assert_eq!(packet.payload, Payload::Literal(vec![2021]));
+        assert_eq!(packet.payload, Payload::Literal(2021));
     }
 
     #[test]
@@ -293,8 +293,8 @@ mod tests {
         assert_eq!(packet.header.version, 1);
         let subpackets = packet.payload.as_subpackets().unwrap();
         assert_eq!(subpackets.len(), 2);
-        assert_eq!(subpackets[0].payload.as_literal().unwrap(), &[10]);
-        assert_eq!(subpackets[1].payload.as_literal().unwrap(), &[20]);
+        assert_eq!(subpackets[0].payload.as_literal().unwrap(), 10);
+        assert_eq!(subpackets[1].payload.as_literal().unwrap(), 20);
     }
 
     #[test]
@@ -303,9 +303,9 @@ mod tests {
         assert_eq!(packet.header.version, 7);
         let subpackets = packet.payload.as_subpackets().unwrap();
         assert_eq!(subpackets.len(), 3);
-        assert_eq!(subpackets[0].payload.as_literal().unwrap(), &[1]);
-        assert_eq!(subpackets[1].payload.as_literal().unwrap(), &[2]);
-        assert_eq!(subpackets[2].payload.as_literal().unwrap(), &[3]);
+        assert_eq!(subpackets[0].payload.as_literal().unwrap(), 1);
+        assert_eq!(subpackets[1].payload.as_literal().unwrap(), 2);
+        assert_eq!(subpackets[2].payload.as_literal().unwrap(), 3);
     }
 
     #[test]
