@@ -6,9 +6,16 @@ use num_enum::{FromPrimitive, IntoPrimitive};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPrimitive, FromPrimitive)]
 #[repr(u8)]
 pub enum Type {
+    Sum = 0,
+    Product = 1,
+    Minimum = 2,
+    Maximum = 3,
     Literal = 4,
+    GreaterThan = 5,
+    LessThan = 6,
+    EqualTo = 7,
     #[num_enum(default)]
-    UnknownOperator = 0,
+    UnknownOperator = u8::MAX,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +60,7 @@ impl LengthType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Payload {
-    Literal(Vec<u64>),
+    Literal(u64),
     SubPackets(Vec<Packet>),
 }
 
@@ -62,66 +69,62 @@ impl Payload {
     ///
     /// Return `(Self, num_bits_read)`, or an error.
     fn read(type_id: Type, reader: &mut BitReader) -> Result<(Self, usize), Error> {
-        match type_id {
-            Type::Literal => {
-                const GROUP_SIZE: u8 = 5;
-                let mut output = Vec::new();
-                let mut is_last = false;
-                let mut bits_read = 0;
+        if let Type::Literal = type_id {
+            const GROUP_SIZE: u8 = 5;
+            let mut is_last = false;
+            let mut bits_read = 0;
 
-                while !is_last {
-                    let mut chunk = 0;
-                    for _ in 0..(u64::BITS / 4) {
-                        let group = reader.read_u64(GROUP_SIZE).map_err(Error::LiteralGroup)?;
-                        bits_read += GROUP_SIZE as usize;
-                        chunk = (chunk << 4) | (group & 0xf);
+            let mut chunk = 0;
+            for _ in 0..(u64::BITS / 4) {
+                let group = reader.read_u64(GROUP_SIZE).map_err(Error::LiteralGroup)?;
+                bits_read += GROUP_SIZE as usize;
+                chunk = (chunk << 4) | (group & 0xf);
 
-                        is_last = group & (1 << 4) == 0;
-                        if is_last {
-                            break;
-                        }
-                    }
-
-                    output.push(chunk);
+                is_last = group & (1 << 4) == 0;
+                if is_last {
+                    break;
                 }
-
-                Ok((Payload::Literal(output), bits_read))
             }
-            Type::UnknownOperator => {
-                let mut bits_read = 0;
-                let mut subpacket_bits_read = 0;
-                let mut packets_read = 0;
 
-                let length_type: LengthType = reader.read_u8(1).map_err(Error::LengthType)?.into();
-                bits_read += 1;
-                let target = match length_type {
-                    LengthType::TotalBits => {
-                        bits_read += 15;
-                        reader.read_u16(15).map_err(Error::LengthTarget)? as usize
-                    }
-                    LengthType::NumberSubPackets => {
-                        bits_read += 11;
-                        reader.read_u16(11).map_err(Error::LengthTarget)? as usize
-                    }
-                };
+            if !is_last {
+                return Err(Error::OversizeLiteral);
+            }
 
-                let mut subpackets = Vec::new();
-                while length_type.continue_looping(subpacket_bits_read, packets_read, target) {
-                    let (packet, packet_bits) = Packet::read(reader)?;
-                    packets_read += 1;
-                    bits_read += packet_bits;
-                    subpacket_bits_read += packet_bits;
-                    subpackets.push(packet);
+            Ok((Payload::Literal(chunk), bits_read))
+        } else {
+            let mut bits_read = 0;
+            let mut subpacket_bits_read = 0;
+            let mut packets_read = 0;
+
+            let length_type: LengthType = reader.read_u8(1).map_err(Error::LengthType)?.into();
+            bits_read += 1;
+            let target = match length_type {
+                LengthType::TotalBits => {
+                    bits_read += 15;
+                    reader.read_u16(15).map_err(Error::LengthTarget)? as usize
                 }
+                LengthType::NumberSubPackets => {
+                    bits_read += 11;
+                    reader.read_u16(11).map_err(Error::LengthTarget)? as usize
+                }
+            };
 
-                Ok((Payload::SubPackets(subpackets), bits_read))
+            let mut subpackets = Vec::new();
+            while length_type.continue_looping(subpacket_bits_read, packets_read, target) {
+                let (packet, packet_bits) = Packet::read(reader)?;
+                packets_read += 1;
+                bits_read += packet_bits;
+                subpacket_bits_read += packet_bits;
+                subpackets.push(packet);
             }
+
+            Ok((Payload::SubPackets(subpackets), bits_read))
         }
     }
 
-    pub fn as_literal(&self) -> Option<&Vec<u64>> {
+    pub fn as_literal(&self) -> Option<u64> {
         match self {
-            Payload::Literal(ref value) => Some(value),
+            Payload::Literal(value) => Some(*value),
             Payload::SubPackets(_) => None,
         }
     }
@@ -160,6 +163,92 @@ impl Packet {
     pub fn parse_hex(data: &str) -> Result<Self, Error> {
         Self::parse(&hex::decode(data)?)
     }
+
+    /// Compute the value of the packet.
+    pub fn value(&self) -> u64 {
+        match self.header.type_id {
+            Type::Literal => self.payload.as_literal().unwrap(),
+            Type::Sum => self
+                .payload
+                .as_subpackets()
+                .unwrap()
+                .iter()
+                .map(|packet| packet.value())
+                .sum(),
+            Type::Product => self
+                .payload
+                .as_subpackets()
+                .unwrap()
+                .iter()
+                .map(|packet| packet.value())
+                .product(),
+            Type::Minimum => self
+                .payload
+                .as_subpackets()
+                .unwrap()
+                .iter()
+                .map(|packet| packet.value())
+                .min()
+                .unwrap_or_default(),
+            Type::Maximum => self
+                .payload
+                .as_subpackets()
+                .unwrap()
+                .iter()
+                .map(|packet| packet.value())
+                .max()
+                .unwrap_or_default(),
+            Type::GreaterThan => {
+                let subpackets = self.payload.as_subpackets().unwrap();
+                if subpackets.len() != 2 {
+                    eprintln!(
+                        "WARN: {:?} packet had {} subpackets; expected 2",
+                        self.header.type_id,
+                        subpackets.len()
+                    );
+                    return 0;
+                }
+                if subpackets[0].value() > subpackets[1].value() {
+                    1
+                } else {
+                    0
+                }
+            }
+            Type::LessThan => {
+                let subpackets = self.payload.as_subpackets().unwrap();
+                if subpackets.len() != 2 {
+                    eprintln!(
+                        "WARN: {:?} packet had {} subpackets; expected 2",
+                        self.header.type_id,
+                        subpackets.len()
+                    );
+                    return 0;
+                }
+                if subpackets[0].value() < subpackets[1].value() {
+                    1
+                } else {
+                    0
+                }
+            }
+            Type::EqualTo => {
+                let subpackets = self.payload.as_subpackets().unwrap();
+                if subpackets.len() != 2 {
+                    eprintln!(
+                        "WARN: {:?} packet had {} subpackets; expected 2",
+                        self.header.type_id,
+                        subpackets.len()
+                    );
+                    return 0;
+                }
+                if subpackets[0].value() == subpackets[1].value() {
+                    1
+                } else {
+                    0
+                }
+            }
+            Type::UnknownOperator => panic!("unknown operator has no value"),
+        }
+    }
 }
 
 impl FromStr for Packet {
@@ -182,6 +271,8 @@ pub enum Error {
     LengthTarget(#[source] bitreader::BitReaderError),
     #[error("parsing hex")]
     HexDecode(#[from] hex::FromHexError),
+    #[error("literal does not fit into u64")]
+    OversizeLiteral,
 }
 
 #[cfg(test)]
@@ -200,7 +291,6 @@ mod tests {
     fn example_operator_bit_type() {
         let packet = Packet::parse_hex("38006F45291200").unwrap();
         assert_eq!(packet.header.version, 1);
-        assert_eq!(packet.header.type_id, Type::UnknownOperator);
         let subpackets = packet.payload.as_subpackets().unwrap();
         assert_eq!(subpackets.len(), 2);
         assert_eq!(subpackets[0].payload.as_literal().unwrap(), &[10]);
@@ -211,7 +301,6 @@ mod tests {
     fn example_operator_subpacket_type() {
         let packet = Packet::parse_hex("EE00D40C823060").unwrap();
         assert_eq!(packet.header.version, 7);
-        assert_eq!(packet.header.type_id, Type::UnknownOperator);
         let subpackets = packet.payload.as_subpackets().unwrap();
         assert_eq!(subpackets.len(), 3);
         assert_eq!(subpackets[0].payload.as_literal().unwrap(), &[1]);

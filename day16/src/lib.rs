@@ -21,7 +21,10 @@ pub fn part1(input: &Path) -> Result<(), Error> {
 }
 
 pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+    let data = std::fs::read_to_string(input)?;
+    let packet = Packet::parse_hex(data.trim())?;
+    println!("packet value: {}", packet.value());
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
