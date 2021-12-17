@@ -32,7 +32,6 @@ impl Probe {
     }
 
     /// Adjust position by a single step.
-    #[allow(dead_code)]
     fn step(mut self) -> Self {
         self.position += self.velocity;
         match self.velocity.x.cmp(&0) {
@@ -44,25 +43,12 @@ impl Probe {
         self
     }
 
-    /// Compute the x position of a probe after a certain number of steps,
-    /// without simulating all the steps.
-    #[allow(dead_code)]
-    fn x_position(self, steps: i32) -> i32 {
-        triangular_number(self.velocity.x) - triangular_number((self.velocity.x - steps).max(0))
-            + self.position.x
-    }
-
     /// Compute the y position of a probe after a certain number of steps,
     /// without simulating all the steps.
+    #[cfg(debug_assertions)]
     fn y_position(self, steps: i32) -> i32 {
         triangular_number(self.velocity.y) - triangular_number(self.velocity.y - steps)
             + self.position.y
-    }
-
-    /// Compute the probe's position after a certain number of steps.
-    #[allow(dead_code)]
-    fn position(self, steps: i32) -> Point {
-        Point::new(self.x_position(steps), self.y_position(steps))
     }
 
     /// Find the min x velocity which lands the probe in the target area.
@@ -95,7 +81,7 @@ impl Probe {
     /// We can observe from this that for any given positive velocity,
     /// the position at `y_position(velocity * 2 + 2) == -velocity - 1`.
     /// It's therefore straightforward that `v_max_y = -(low_y + 1)`.
-    fn find_max_y(low_y: i32, high_y: i32) -> i32 {
+    fn find_max_y(low_y: i32, _high_y: i32) -> i32 {
         assert!(
             low_y < 0,
             "this formula is not known to work for positive target areas"
@@ -111,7 +97,7 @@ impl Probe {
             }
 
             assert!(position(v_max_y) >= low_y);
-            assert!(position(v_max_y) <= high_y);
+            assert!(position(v_max_y) <= _high_y);
             assert!(position(v_max_y + 1) < low_y);
         }
 
@@ -141,6 +127,13 @@ struct TargetArea {
     high_y: i32,
 }
 
+impl TargetArea {
+    fn contains(&self, point: Point) -> bool {
+        (self.low_x..=self.high_x).contains(&point.x)
+            && (self.low_y..=self.high_y).contains(&point.y)
+    }
+}
+
 pub fn part1(input: &Path) -> Result<(), Error> {
     for (idx, target_area) in parse::<TargetArea>(input)?.enumerate() {
         let mut probe = Probe::default();
@@ -159,13 +152,38 @@ pub fn part1(input: &Path) -> Result<(), Error> {
 }
 
 pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+    for (idx, target_area) in parse::<TargetArea>(input)?.enumerate() {
+        let low_x = Probe::find_min_x(target_area.low_x, target_area.high_x);
+        let high_y = Probe::find_max_y(target_area.low_y, target_area.high_y);
+
+        let mut count_workable_velocities = 0;
+        for vx in low_x..=target_area.high_x {
+            for vy in target_area.low_y..=high_y {
+                let mut probe = Probe::default().with_velocity(Point::new(vx, vy));
+
+                for _ in 0.. {
+                    probe = probe.step();
+                    if target_area.contains(probe.position) {
+                        count_workable_velocities += 1;
+                        break;
+                    }
+                    if probe.position.y < target_area.low_y {
+                        break;
+                    }
+                }
+            }
+        }
+
+        println!(
+            "target area {}: workable velocities: {}",
+            idx, count_workable_velocities,
+        );
+    }
+    Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("no solution found")]
-    NoSolution,
 }
