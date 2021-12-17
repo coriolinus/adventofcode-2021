@@ -166,86 +166,41 @@ impl Packet {
 
     /// Compute the value of the packet.
     pub fn value(&self) -> u64 {
+        fn subpacket_values<'a>(packet: &'a Packet) -> impl 'a + Iterator<Item = u64> {
+            packet
+                .payload
+                .as_subpackets()
+                .unwrap()
+                .iter()
+                .map(|packet| packet.value())
+        }
+
+        fn compare_two(packet: &Packet, comparitor: std::cmp::Ordering) -> u64 {
+            let subpackets = packet.payload.as_subpackets().unwrap();
+            if subpackets.len() != 2 {
+                eprintln!(
+                    "WARN: {:?} packet had {} subpackets; expected 2",
+                    packet.header.type_id,
+                    subpackets.len()
+                );
+                return 0;
+            }
+            if subpackets[0].value().cmp(&subpackets[1].value()) == comparitor {
+                1
+            } else {
+                0
+            }
+        }
+
         match self.header.type_id {
             Type::Literal => self.payload.as_literal().unwrap(),
-            Type::Sum => self
-                .payload
-                .as_subpackets()
-                .unwrap()
-                .iter()
-                .map(|packet| packet.value())
-                .sum(),
-            Type::Product => self
-                .payload
-                .as_subpackets()
-                .unwrap()
-                .iter()
-                .map(|packet| packet.value())
-                .product(),
-            Type::Minimum => self
-                .payload
-                .as_subpackets()
-                .unwrap()
-                .iter()
-                .map(|packet| packet.value())
-                .min()
-                .unwrap_or_default(),
-            Type::Maximum => self
-                .payload
-                .as_subpackets()
-                .unwrap()
-                .iter()
-                .map(|packet| packet.value())
-                .max()
-                .unwrap_or_default(),
-            Type::GreaterThan => {
-                let subpackets = self.payload.as_subpackets().unwrap();
-                if subpackets.len() != 2 {
-                    eprintln!(
-                        "WARN: {:?} packet had {} subpackets; expected 2",
-                        self.header.type_id,
-                        subpackets.len()
-                    );
-                    return 0;
-                }
-                if subpackets[0].value() > subpackets[1].value() {
-                    1
-                } else {
-                    0
-                }
-            }
-            Type::LessThan => {
-                let subpackets = self.payload.as_subpackets().unwrap();
-                if subpackets.len() != 2 {
-                    eprintln!(
-                        "WARN: {:?} packet had {} subpackets; expected 2",
-                        self.header.type_id,
-                        subpackets.len()
-                    );
-                    return 0;
-                }
-                if subpackets[0].value() < subpackets[1].value() {
-                    1
-                } else {
-                    0
-                }
-            }
-            Type::EqualTo => {
-                let subpackets = self.payload.as_subpackets().unwrap();
-                if subpackets.len() != 2 {
-                    eprintln!(
-                        "WARN: {:?} packet had {} subpackets; expected 2",
-                        self.header.type_id,
-                        subpackets.len()
-                    );
-                    return 0;
-                }
-                if subpackets[0].value() == subpackets[1].value() {
-                    1
-                } else {
-                    0
-                }
-            }
+            Type::Sum => subpacket_values(self).sum(),
+            Type::Product => subpacket_values(self).product(),
+            Type::Minimum => subpacket_values(self).min().unwrap_or_default(),
+            Type::Maximum => subpacket_values(self).max().unwrap_or_default(),
+            Type::GreaterThan => compare_two(self, std::cmp::Ordering::Greater),
+            Type::LessThan => compare_two(self, std::cmp::Ordering::Less),
+            Type::EqualTo => compare_two(self, std::cmp::Ordering::Equal),
             Type::UnknownOperator => panic!("unknown operator has no value"),
         }
     }
