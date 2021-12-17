@@ -25,19 +25,10 @@ pub struct Header {
 }
 
 impl Header {
-    /// Read the header data from the bitreader.
-    ///
-    /// Return `(Self, num_bits_read)`, or an error.
-    fn read(reader: &mut BitReader) -> Result<(Self, usize), Error> {
+    fn read(reader: &mut BitReader) -> Result<Self, Error> {
         let version = reader.read_u8(3).map_err(Error::Header)?;
-        let type_id = reader.read_u8(3).map_err(Error::Header)?;
-        Ok((
-            Header {
-                version,
-                type_id: type_id.into(),
-            },
-            6,
-        ))
+        let type_id = reader.read_u8(3).map_err(Error::Header)?.into();
+        Ok(Header { version, type_id })
     }
 }
 
@@ -50,7 +41,7 @@ enum LengthType {
 }
 
 impl LengthType {
-    fn continue_looping(self, bits_read: usize, packets_read: usize, target: usize) -> bool {
+    fn continue_looping(self, bits_read: u64, packets_read: u64, target: u64) -> bool {
         match self {
             LengthType::TotalBits => bits_read < target,
             LengthType::NumberSubPackets => packets_read < target,
@@ -65,60 +56,44 @@ pub enum Payload {
 }
 
 impl Payload {
-    /// Read the payload data from the bitreader.
-    ///
-    /// Return `(Self, num_bits_read)`, or an error.
-    fn read(type_id: Type, reader: &mut BitReader) -> Result<(Self, usize), Error> {
+    fn read(type_id: Type, reader: &mut BitReader) -> Result<Self, Error> {
         if let Type::Literal = type_id {
-            const GROUP_SIZE: u8 = 5;
             let mut is_last = false;
-            let mut bits_read = 0;
+            let mut filled_bits = 0;
 
-            let mut chunk = 0;
-            for _ in 0..(u64::BITS / 4) {
-                let group = reader.read_u64(GROUP_SIZE).map_err(Error::LiteralGroup)?;
-                bits_read += GROUP_SIZE as usize;
-                chunk = (chunk << 4) | (group & 0xf);
+            let mut value = 0;
+            while !is_last && filled_bits <= u64::BITS {
+                let group = reader.read_u64(5).map_err(Error::LiteralGroup)?;
+                value = (value << 4) | (group & 0xf);
+                filled_bits += 4;
 
                 is_last = group & (1 << 4) == 0;
-                if is_last {
-                    break;
-                }
             }
 
             if !is_last {
                 return Err(Error::OversizeLiteral);
             }
 
-            Ok((Payload::Literal(chunk), bits_read))
+            Ok(Payload::Literal(value))
         } else {
-            let mut bits_read = 0;
-            let mut subpacket_bits_read = 0;
-            let mut packets_read = 0;
-
             let length_type: LengthType = reader.read_u8(1).map_err(Error::LengthType)?.into();
-            bits_read += 1;
             let target = match length_type {
-                LengthType::TotalBits => {
-                    bits_read += 15;
-                    reader.read_u16(15).map_err(Error::LengthTarget)? as usize
-                }
-                LengthType::NumberSubPackets => {
-                    bits_read += 11;
-                    reader.read_u16(11).map_err(Error::LengthTarget)? as usize
-                }
+                LengthType::TotalBits => reader.read_u64(15).map_err(Error::LengthTarget)?,
+                LengthType::NumberSubPackets => reader.read_u64(11).map_err(Error::LengthTarget)?,
             };
 
+            let pre_subpacket_index = reader.position();
+
             let mut subpackets = Vec::new();
-            while length_type.continue_looping(subpacket_bits_read, packets_read, target) {
-                let (packet, packet_bits) = Packet::read(reader)?;
-                packets_read += 1;
-                bits_read += packet_bits;
-                subpacket_bits_read += packet_bits;
-                subpackets.push(packet);
+            while length_type.continue_looping(
+                reader.position() - pre_subpacket_index,
+                subpackets.len() as u64,
+                target,
+            ) {
+                subpackets.push(Packet::read(reader)?);
             }
 
-            Ok((Payload::SubPackets(subpackets), bits_read))
+            Ok(Payload::SubPackets(subpackets))
         }
     }
 
@@ -144,19 +119,16 @@ pub struct Packet {
 }
 
 impl Packet {
-    fn read(reader: &mut BitReader) -> Result<(Self, usize), Error> {
-        let mut bits_read = 0;
-        let (header, bits) = Header::read(reader)?;
-        bits_read += bits;
-        let (payload, bits) = Payload::read(header.type_id, reader)?;
-        bits_read += bits;
+    fn read(reader: &mut BitReader) -> Result<Self, Error> {
+        let header = Header::read(reader)?;
+        let payload = Payload::read(header.type_id, reader)?;
 
-        Ok((Packet { header, payload }, bits_read))
+        Ok(Packet { header, payload })
     }
 
     /// Parse a slice of data as a packet.
     pub fn parse(data: &[u8]) -> Result<Self, Error> {
-        Self::read(&mut BitReader::new(data)).map(|(packet, _)| packet)
+        Self::read(&mut BitReader::new(data))
     }
 
     /// Parse a hex string as a packet.
