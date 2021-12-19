@@ -161,56 +161,52 @@ impl<T> Node<T> {
         }
     }
 
-    /// Return the next left-most node regardless of type.
+    /// Return the parent of the next left-most node.
     ///
-    /// This produces a sibling node: one whose depth is equal to this node's.
-    fn left_sibling(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
+    /// This always produces a branch node of depth less than this node's.
+    /// If this node is on the right, this produces the node's imediate parent.
+    /// Otherwise, it will step upward arbitrarily far, seeking an ancestor
+    /// whose direct descendent is on the right. It then returns that ancestor.
+    fn left_parent(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
         let parent = self.up.as_ref()?.upgrade()?;
         let contents = parent.contents.borrow();
-        let branch = contents
-            .as_branch()
-            .expect("parenthood implies being a branch");
+        let branch = contents.as_branch().expect("parenthood implies branch");
 
         if Rc::ptr_eq(self, &branch.right) {
-            Some(Rc::downgrade(&branch.left))
+            Some(Rc::downgrade(&parent))
         } else {
-            let left_uncle = parent.left_sibling()?.upgrade()?;
-            let contents = left_uncle.contents.borrow();
-            let branch = contents.as_branch()?;
-            Some(Rc::downgrade(&branch.right))
+            parent.left_parent()
         }
     }
 
-    /// Return the next right-most node regardless of type.
+    /// Return the parent of the next right-most node.
     ///
-    /// This produces a sibling node: one whose depth is equal to this node's.
-    fn right_sibling(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
+    /// This always produces a branch node of depth less than this node's.
+    /// If this node is on the left, this produces the node's immediate parent.
+    /// Otherwise, it will step upwards arbitrarily far, seeking an ancestor
+    /// whose direct descendent is on the left. It then returns that ancestor.
+    fn right_parent(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
         let parent = self.up.as_ref()?.upgrade()?;
         let contents = parent.contents.borrow();
-        let branch = contents
-            .as_branch()
-            .expect("parenthood implies being a branch");
+        let branch = contents.as_branch().expect("parenthood implies branch");
 
         if Rc::ptr_eq(self, &branch.left) {
-            Some(Rc::downgrade(&branch.right))
+            Some(Rc::downgrade(&parent))
         } else {
-            let right_uncle = parent.right_sibling()?.upgrade()?;
-            let contents = right_uncle.contents.borrow();
-            let branch = contents.as_branch()?;
-            Some(Rc::downgrade(&branch.left))
+            parent.right_parent()
         }
     }
 
     /// Return the next leaf left from this node.
     fn left_leaf(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let sibling = self.left_sibling()?.upgrade()?;
-        Some(sibling.rightmost_grandchild())
+        let parent = self.left_parent()?.upgrade()?;
+        Some(parent.left_child()?.upgrade()?.rightmost_grandchild())
     }
 
     /// Return the next leaf right from this node.
     fn right_leaf(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let sibling = self.right_sibling()?.upgrade()?;
-        Some(sibling.leftmost_grandchild())
+        let parent = self.right_parent()?.upgrade()?;
+        Some(parent.right_child()?.upgrade()?.leftmost_grandchild())
     }
 }
 
@@ -355,6 +351,7 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     fn parse(s: &str) -> Rc<SnailfishNumber> {
         Rc::new(s.parse().unwrap())
@@ -366,5 +363,20 @@ mod tests {
             parse("[1,2]").add(parse("[[3,4],5]")).unwrap(),
             parse("[[1,2],[[3,4],5]]")
         );
+    }
+
+    #[rstest]
+    #[case("[[[[[9,8],1],2],3],4]", "[[[[0,9],2],3],4]")]
+    #[case("[7,[6,[5,[4,[3,2]]]]]", "[7,[6,[5,[7,0]]]]")]
+    #[case("[[6,[5,[4,[3,2]]]],1]", "[[6,[5,[7,0]]],3]")]
+    #[case(
+        "[[3,[2,[1,[7,3]]]],[6,[5,[4,[3,2]]]]]",
+        "[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]"
+    )]
+    #[case("[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]", "[[3,[2,[8,0]]],[9,[5,[7,0]]]]")]
+    fn explode(#[case] input: &str, #[case] expect: &str) {
+        let sfn = parse(input);
+        assert!(sfn.try_explode());
+        assert_eq!(sfn, parse(expect));
     }
 }

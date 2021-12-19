@@ -14,3 +14,6 @@ thiserror = "1.0.22"
 
 [build-dependencies]
 lalrpop = "0.19.6"
+
+[dev-dependencies]
+rstest = "0.10.0"
