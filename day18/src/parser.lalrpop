@@ -1,0 +1,11 @@
+use super::SnailfishNumber;
+use std::rc::Rc;
+
+grammar;
+
+Leaf: Rc<SnailfishNumber> = <s:r"[0-9]+"> => SnailfishNumber::new_value(s.parse().expect("all values should be valid u8"));
+
+pub Snailfish: Rc<SnailfishNumber> = {
+    <Leaf> => <>,
+    "[" <left:Snailfish> "," <right:Snailfish> "]" => SnailfishNumber::new_pair(left, right).expect("fresh parse should construct ok"),
+};

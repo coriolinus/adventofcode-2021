@@ -1,5 +1,9 @@
+use lalrpop_util::lalrpop_mod;
+lalrpop_mod!(parser);
+
 use std::{
     cell::RefCell,
+    fmt,
     ops::Deref,
     path::Path,
     rc::{Rc, Weak},
@@ -8,19 +12,34 @@ use std::{
 
 use aoclib::parse;
 
+#[derive(PartialEq)]
 struct Branch<T> {
     left: Rc<Node<T>>,
     right: Rc<Node<T>>,
 }
 
-enum NodeType<T> {
+#[derive(PartialEq)]
+enum Contents<T> {
     Leaf(T),
     Branch(Branch<T>),
 }
 
-impl<T> NodeType<T> {
+impl<T: fmt::Debug> fmt::Debug for Contents<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Leaf(leaf) => write!(f, "{:?}", leaf),
+            Self::Branch(branch) => f
+                .debug_list()
+                .entry(&branch.left)
+                .entry(&branch.right)
+                .finish(),
+        }
+    }
+}
+
+impl<T> Contents<T> {
     fn as_leaf(&self) -> Option<&T> {
-        if let NodeType::Leaf(ref t) = self {
+        if let Contents::Leaf(ref t) = self {
             Some(t)
         } else {
             None
@@ -28,7 +47,7 @@ impl<T> NodeType<T> {
     }
 
     fn as_branch(&self) -> Option<&Branch<T>> {
-        if let NodeType::Branch(ref branch) = self {
+        if let Contents::Branch(ref branch) = self {
             Some(branch)
         } else {
             None
@@ -36,16 +55,28 @@ impl<T> NodeType<T> {
     }
 }
 
-struct Node<T> {
-    node_type: RefCell<NodeType<T>>,
+pub struct Node<T> {
+    contents: RefCell<Contents<T>>,
     up: Option<Weak<Node<T>>>,
+}
+
+impl<T: fmt::Debug> fmt::Debug for Node<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.contents.borrow())
+    }
+}
+
+impl<T: PartialEq> PartialEq for Node<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.contents == other.contents
+    }
 }
 
 impl<T> Node<T> {
     /// Construct a new value node without a parent.
     fn new_value(value: T) -> Rc<Self> {
         Rc::new(Self {
-            node_type: RefCell::new(NodeType::Leaf(value)),
+            contents: RefCell::new(Contents::Leaf(value)),
             up: None,
         })
     }
@@ -57,15 +88,13 @@ impl<T> Node<T> {
         if left.up.is_some()
             || right.up.is_some()
             || Rc::strong_count(&left) > 1
-            || Rc::weak_count(&left) > 0
             || Rc::strong_count(&right) > 1
-            || Rc::weak_count(&right) > 0
         {
             return None;
         }
 
         let root = Rc::new(Self {
-            node_type: RefCell::new(NodeType::Branch(Branch { left, right })),
+            contents: RefCell::new(Contents::Branch(Branch { left, right })),
             up: None,
         });
 
@@ -88,22 +117,22 @@ impl<T> Node<T> {
     where
         T: Copy,
     {
-        let node_type = self.node_type.borrow();
-        node_type.as_leaf().copied()
+        let contents = self.contents.borrow();
+        contents.as_leaf().copied()
     }
 
     /// Return the left child of this node if this is a branch node.
     fn left_child(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let node_type = self.node_type.borrow();
-        node_type
+        let contents = self.contents.borrow();
+        contents
             .as_branch()
             .map(|branch| Rc::downgrade(&branch.left))
     }
 
     /// Return the right child of this node if this is a branch node.
     fn right_child(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let node_type = self.node_type.borrow();
-        node_type
+        let contents = self.contents.borrow();
+        contents
             .as_branch()
             .map(|branch| Rc::downgrade(&branch.right))
     }
@@ -114,9 +143,9 @@ impl<T> Node<T> {
     ///
     /// Returns `self` if `self` is already a leaf.
     fn leftmost_grandchild(self: &Rc<Self>) -> Weak<Node<T>> {
-        match self.node_type.borrow().deref() {
-            NodeType::Leaf(_) => Rc::downgrade(self),
-            NodeType::Branch(branch) => branch.left.leftmost_grandchild(),
+        match self.contents.borrow().deref() {
+            Contents::Leaf(_) => Rc::downgrade(self),
+            Contents::Branch(branch) => branch.left.leftmost_grandchild(),
         }
     }
 
@@ -126,9 +155,9 @@ impl<T> Node<T> {
     ///
     /// Returns `self` if `self` is already a leaf.
     fn rightmost_grandchild(self: &Rc<Self>) -> Weak<Node<T>> {
-        match self.node_type.borrow().deref() {
-            NodeType::Leaf(_) => Rc::downgrade(self),
-            NodeType::Branch(branch) => branch.right.rightmost_grandchild(),
+        match self.contents.borrow().deref() {
+            Contents::Leaf(_) => Rc::downgrade(self),
+            Contents::Branch(branch) => branch.right.rightmost_grandchild(),
         }
     }
 
@@ -137,8 +166,8 @@ impl<T> Node<T> {
     /// This produces a sibling node: one whose depth is equal to this node's.
     fn left_sibling(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
         let parent = self.up.as_ref()?.upgrade()?;
-        let node_type = parent.node_type.borrow();
-        let branch = node_type
+        let contents = parent.contents.borrow();
+        let branch = contents
             .as_branch()
             .expect("parenthood implies being a branch");
 
@@ -146,8 +175,8 @@ impl<T> Node<T> {
             Some(Rc::downgrade(&branch.left))
         } else {
             let left_uncle = parent.left_sibling()?.upgrade()?;
-            let node_type = left_uncle.node_type.borrow();
-            let branch = node_type.as_branch()?;
+            let contents = left_uncle.contents.borrow();
+            let branch = contents.as_branch()?;
             Some(Rc::downgrade(&branch.right))
         }
     }
@@ -157,8 +186,8 @@ impl<T> Node<T> {
     /// This produces a sibling node: one whose depth is equal to this node's.
     fn right_sibling(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
         let parent = self.up.as_ref()?.upgrade()?;
-        let node_type = parent.node_type.borrow();
-        let branch = node_type
+        let contents = parent.contents.borrow();
+        let branch = contents
             .as_branch()
             .expect("parenthood implies being a branch");
 
@@ -166,8 +195,8 @@ impl<T> Node<T> {
             Some(Rc::downgrade(&branch.right))
         } else {
             let right_uncle = parent.right_sibling()?.upgrade()?;
-            let node_type = right_uncle.node_type.borrow();
-            let branch = node_type.as_branch()?;
+            let contents = right_uncle.contents.borrow();
+            let branch = contents.as_branch()?;
             Some(Rc::downgrade(&branch.left))
         }
     }
@@ -219,7 +248,7 @@ impl SnailfishNumber {
         // handle the actual explosion case
         let mut did_explode = false;
         if depth == 4 {
-            if let Some(branch) = self.node_type.borrow().as_branch() {
+            if let Some(branch) = self.contents.borrow().as_branch() {
                 did_explode = true;
                 debug_assert!(
                     branch.left.value_copied().is_some() && branch.right.value_copied().is_some(),
@@ -232,7 +261,7 @@ impl SnailfishNumber {
                     ) + left
                         .value_copied()
                         .expect("left_leaf always produces a leaf");
-                    left.node_type.replace(NodeType::Leaf(new_value));
+                    left.contents.replace(Contents::Leaf(new_value));
                 }
                 if let Some(right) = self.right_leaf().and_then(|leaf| leaf.upgrade()) {
                     let new_value = branch.right.value_copied().expect(
@@ -240,18 +269,18 @@ impl SnailfishNumber {
                     ) + right
                         .value_copied()
                         .expect("right_leaf always produces a leaf");
-                    right.node_type.replace(NodeType::Leaf(new_value));
+                    right.contents.replace(Contents::Leaf(new_value));
                 }
             }
             if did_explode {
-                self.node_type.replace(NodeType::Leaf(0));
+                self.contents.replace(Contents::Leaf(0));
             }
         }
 
         // handle recursion by abusing short-circuit behavior:
         // if at any point something explodes, we return immediately instead of continuing to explode
         did_explode
-            || if let Some(branch) = self.node_type.borrow().as_branch() {
+            || if let Some(branch) = self.contents.borrow().as_branch() {
                 branch.left.explode_inner(depth + 1) || branch.right.explode_inner(depth + 1)
             } else {
                 false
@@ -263,12 +292,12 @@ impl SnailfishNumber {
             if value >= 10 {
                 let left = Self::new_value(value / 2);
                 let right = Self::new_value(value / 2 + value % 2);
-                self.node_type
-                    .replace(NodeType::Branch(Branch { left, right }));
+                self.contents
+                    .replace(Contents::Branch(Branch { left, right }));
                 return true;
             }
         }
-        if let Some(branch) = self.node_type.borrow().as_branch() {
+        if let Some(branch) = self.contents.borrow().as_branch() {
             branch.left.try_split() || branch.right.try_split()
         } else {
             false
@@ -276,9 +305,9 @@ impl SnailfishNumber {
     }
 
     fn magnitude(self: &Rc<Self>) -> u64 {
-        match self.node_type.borrow().deref() {
-            NodeType::Leaf(value) => *value as u64,
-            NodeType::Branch(branch) => {
+        match self.contents.borrow().deref() {
+            Contents::Leaf(value) => *value as u64,
+            Contents::Branch(branch) => {
                 (branch.left.magnitude() * 3) + (branch.right.magnitude() * 2)
             }
         }
@@ -289,10 +318,14 @@ impl FromStr for SnailfishNumber {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        todo!()
+        parser::SnailfishParser::new()
+            .parse(s)
+            .map(|rc| Rc::try_unwrap(rc).expect("fresh rc has no other references"))
+            .map_err(|err| err.map_token(|t| t.to_string()).into())
     }
 }
 
+// known wrong, too low: 1094
 pub fn part1(input: &Path) -> Result<(), Error> {
     let sum = parse::<SnailfishNumber>(input)?
         .map(Rc::new)
@@ -313,6 +346,25 @@ pub fn part2(input: &Path) -> Result<(), Error> {
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("parse error")]
+    ParseError(#[from] lalrpop_util::ParseError<usize, String, &'static str>),
     #[error("no solution found")]
     NoSolution,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(s: &str) -> Rc<SnailfishNumber> {
+        Rc::new(s.parse().unwrap())
+    }
+
+    #[test]
+    fn addition_1() {
+        assert_eq!(
+            parse("[1,2]").add(parse("[[3,4],5]")).unwrap(),
+            parse("[[1,2],[[3,4],5]]")
+        );
+    }
 }
