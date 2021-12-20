@@ -1,21 +1,14 @@
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(parser);
 
-use std::{
-    cell::RefCell,
-    fmt,
-    ops::Deref,
-    path::Path,
-    rc::{Rc, Weak},
-    str::FromStr,
-};
+use std::{cell::RefCell, fmt, ops::Deref, path::Path, str::FromStr};
 
 use aoclib::parse;
 
 #[derive(PartialEq)]
 struct Branch<T> {
-    left: Rc<Node<T>>,
-    right: Rc<Node<T>>,
+    left: Box<Node<T>>,
+    right: Box<Node<T>>,
 }
 
 #[derive(PartialEq)]
@@ -37,27 +30,9 @@ impl<T: fmt::Debug> fmt::Debug for Contents<T> {
     }
 }
 
-impl<T> Contents<T> {
-    fn as_leaf(&self) -> Option<&T> {
-        if let Contents::Leaf(ref t) = self {
-            Some(t)
-        } else {
-            None
-        }
-    }
-
-    fn as_branch(&self) -> Option<&Branch<T>> {
-        if let Contents::Branch(ref branch) = self {
-            Some(branch)
-        } else {
-            None
-        }
-    }
-}
-
 pub struct Node<T> {
     contents: RefCell<Contents<T>>,
-    up: Option<Weak<Node<T>>>,
+    up: Option<*const Node<T>>,
 }
 
 impl<T: fmt::Debug> fmt::Debug for Node<T> {
@@ -72,69 +47,86 @@ impl<T: PartialEq> PartialEq for Node<T> {
     }
 }
 
+struct RefLeaf<'a, T>(std::cell::Ref<'a, Contents<T>>);
+
+impl<'a, T> Deref for RefLeaf<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        if let Contents::Leaf(value) = self.0.deref() {
+            &value
+        } else {
+            panic!("RefLeaf is only constructed for leaf contents")
+        }
+    }
+}
+
+struct RefBranch<'a, T>(std::cell::Ref<'a, Contents<T>>);
+
+impl<'a, T> Deref for RefBranch<'a, T> {
+    type Target = Branch<T>;
+
+    fn deref(&self) -> &Self::Target {
+        if let Contents::Branch(branch) = self.0.deref() {
+            &branch
+        } else {
+            panic!("RefBranch is only constructed for branch contents")
+        }
+    }
+}
+
 impl<T> Node<T> {
     /// Construct a new value node without a parent.
-    fn new_value(value: T) -> Rc<Self> {
-        Rc::new(Self {
+    fn new_value(value: T) -> Self {
+        Self {
             contents: RefCell::new(Contents::Leaf(value)),
             up: None,
-        })
+        }
     }
 
     /// Construct a new pair node without a parent.
     ///
     /// If either child had a parent or an external reference, this function will return `None`.
-    fn new_pair(left: Rc<Node<T>>, right: Rc<Node<T>>) -> Option<Rc<Self>> {
-        if left.up.is_some()
-            || right.up.is_some()
-            || Rc::strong_count(&left) > 1
-            || Rc::strong_count(&right) > 1
-        {
-            return None;
-        }
-
-        let root = Rc::new(Self {
+    fn new_pair(left: Node<T>, right: Node<T>) -> Self {
+        let left = Box::new(left);
+        let right = Box::new(right);
+        let root = Self {
             contents: RefCell::new(Contents::Branch(Branch { left, right })),
             up: None,
-        });
+        };
 
-        // We have to mess with the nodes to create appropriate up pointers,
-        // even though at this point we don't have write access.
-        // That's ok; we know that we have unique access to each of these, so it's ok to reach in
-        // with unsafe sorcery and modify the item anyway.
-        let left_ptr = Rc::as_ptr(&root.left_child().unwrap().upgrade().unwrap()) as *mut Self;
-        let right_ptr = Rc::as_ptr(&root.right_child().unwrap().upgrade().unwrap()) as *mut Self;
-        for ptr in [left_ptr, right_ptr] {
-            unsafe {
-                (*ptr).up = Some(Rc::downgrade(&root));
+        // we have to encapsulate these pointers so the borrow checker doesn't complain
+        {
+            // We have to mess with the nodes to create appropriate up pointers,
+            // even though at this point we don't have write access.
+            // That's ok; we know that we have unique access to each of these, so it's ok to reach in
+            // with unsafe sorcery and modify the item anyway.
+            let left_ptr = &*root.branch().unwrap().left as *const Self as *mut Self;
+            let right_ptr = &*root.branch().unwrap().right as *const Self as *mut Self;
+            for ptr in [left_ptr, right_ptr] {
+                unsafe {
+                    (*ptr).up = Some(&root as _);
+                }
             }
         }
-        Some(root)
+
+        root
     }
 
     /// Return the value of this node if this is a value node.
-    fn value_copied<'a>(self: &'a Rc<Self>) -> Option<T>
-    where
-        T: Copy,
-    {
-        let contents = self.contents.borrow();
-        contents.as_leaf().copied()
+    fn value(&self) -> Option<RefLeaf<'_, T>> {
+        match self.contents.borrow().deref() {
+            Contents::Leaf(_) => Some(RefLeaf(self.contents.borrow())),
+            Contents::Branch(_) => None,
+        }
     }
 
-    /// Return the left child of this node if this is a branch node.
-    fn left_child(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let contents = self.contents.borrow();
-        contents
-            .as_branch()
-            .map(|branch| Rc::downgrade(&branch.left))
-    }
-
-    /// Return the right child of this node if this is a branch node.
-    fn right_child(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let contents = self.contents.borrow();
-        contents
-            .as_branch()
-            .map(|branch| Rc::downgrade(&branch.right))
+    /// Return the branch of this node if this is a branch node.
+    fn branch(&self) -> Option<RefBranch<'_, T>> {
+        match self.contents.borrow().deref() {
+            Contents::Leaf(_) => None,
+            Contents::Branch(_) => Some(RefBranch(self.contents.borrow())),
+        }
     }
 
     /// Return the leftmost grandchild of this node.
@@ -142,9 +134,9 @@ impl<T> Node<T> {
     /// The returned node will always be a leaf.
     ///
     /// Returns `self` if `self` is already a leaf.
-    fn leftmost_grandchild(self: &Rc<Self>) -> Weak<Node<T>> {
+    fn leftmost_grandchild(&self) -> *const Self {
         match self.contents.borrow().deref() {
-            Contents::Leaf(_) => Rc::downgrade(self),
+            Contents::Leaf(_) => self as _,
             Contents::Branch(branch) => branch.left.leftmost_grandchild(),
         }
     }
@@ -154,78 +146,113 @@ impl<T> Node<T> {
     /// The returned node will always be a leaf.
     ///
     /// Returns `self` if `self` is already a leaf.
-    fn rightmost_grandchild(self: &Rc<Self>) -> Weak<Node<T>> {
+    fn rightmost_grandchild(&self) -> *const Self {
         match self.contents.borrow().deref() {
-            Contents::Leaf(_) => Rc::downgrade(self),
+            Contents::Leaf(_) => self as _,
             Contents::Branch(branch) => branch.right.rightmost_grandchild(),
         }
     }
 
-    /// Return the parent of the next left-most node.
+    /// Return the parent of this node.
+    fn parent<'a>(&'a self) -> Option<&'a Self> {
+        // safe because we only ever access a node via the root, and without concurrency.
+        // if we have access to a node, its parent pointer is valid.
+        self.up.map(|ptr| unsafe { &*ptr })
+    }
+
+    /// Return `Some(true)` when this node is its parent's left branch.
+    ///
+    /// `None` when this node is the root.
+    fn is_left(&self) -> Option<bool>
+    where
+        T: fmt::Debug,
+    {
+        let parent = self.parent()?;
+        let left_child = &parent.branch().expect("parenthood implies branch").left;
+        Some(std::ptr::eq(self as _, &**left_child as _))
+    }
+
+    /// Return `Some(true)` when this node is its parent's right branch.
+    ///
+    /// `None` when this node is the root.
+    fn is_right(&self) -> Option<bool>
+    where
+        T: fmt::Debug,
+    {
+        self.is_left().map(|left| !left)
+    }
+
+    /// Return the parent or grandparent of the next left-most node.
     ///
     /// This always produces a branch node of depth less than this node's.
     /// If this node is on the right, this produces the node's imediate parent.
     /// Otherwise, it will step upward arbitrarily far, seeking an ancestor
     /// whose direct descendent is on the right. It then returns that ancestor.
-    fn left_parent(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let parent = self.up.as_ref()?.upgrade()?;
-        let contents = parent.contents.borrow();
-        let branch = contents.as_branch().expect("parenthood implies branch");
-
-        if Rc::ptr_eq(self, &branch.right) {
-            Some(Rc::downgrade(&parent))
+    fn left_parent<'a>(&'a self) -> Option<&'a Node<T>>
+    where
+        T: fmt::Debug,
+    {
+        let parent = self.parent()?;
+        if self.is_right()? {
+            Some(parent)
         } else {
             parent.left_parent()
         }
     }
 
-    /// Return the parent of the next right-most node.
+    /// Return the parent or grandparent of the next right-most node.
     ///
     /// This always produces a branch node of depth less than this node's.
     /// If this node is on the left, this produces the node's immediate parent.
     /// Otherwise, it will step upwards arbitrarily far, seeking an ancestor
     /// whose direct descendent is on the left. It then returns that ancestor.
-    fn right_parent(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let parent = self.up.as_ref()?.upgrade()?;
-        let contents = parent.contents.borrow();
-        let branch = contents.as_branch().expect("parenthood implies branch");
+    fn right_parent<'a>(&'a self) -> Option<&'a Node<T>>
+    where
+        T: fmt::Debug,
+    {
+        let parent = self.parent()?;
 
-        if Rc::ptr_eq(self, &branch.left) {
-            Some(Rc::downgrade(&parent))
+        if self.is_left()? {
+            Some(&parent)
         } else {
             parent.right_parent()
         }
     }
 
     /// Return the next leaf left from this node.
-    fn left_leaf(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let parent = self.left_parent()?.upgrade()?;
-        Some(parent.left_child()?.upgrade()?.rightmost_grandchild())
+    fn left_leaf(&self) -> Option<*const Self>
+    where
+        T: fmt::Debug,
+    {
+        let parent = self.left_parent()?;
+        Some(parent.branch()?.left.rightmost_grandchild())
     }
 
     /// Return the next leaf right from this node.
-    fn right_leaf(self: &Rc<Self>) -> Option<Weak<Node<T>>> {
-        let parent = self.right_parent()?.upgrade()?;
-        Some(parent.right_child()?.upgrade()?.leftmost_grandchild())
+    fn right_leaf(&self) -> Option<*const Self>
+    where
+        T: fmt::Debug,
+    {
+        let parent = self.right_parent()?;
+        Some(parent.branch()?.right.leftmost_grandchild())
     }
 }
 
 type SnailfishNumber = Node<u8>;
 
 impl SnailfishNumber {
-    pub fn add(self: Rc<Self>, other: Rc<Self>) -> Option<Rc<Self>> {
-        SnailfishNumber::new_pair(self, other).map(|sfn| {
-            sfn.reduce();
-            sfn
-        })
+    pub fn add(self: Self, other: Self) -> Self {
+        let sfn = SnailfishNumber::new_pair(self, other);
+        sfn.reduce();
+        sfn
     }
 
-    fn reduce(self: &Rc<Self>) {
+    fn reduce(&self) {
         let mut operation_applied = true;
         while operation_applied {
             operation_applied = false;
             for operation in [
-                Box::new(Self::try_explode) as Box<dyn Fn(&Rc<Self>) -> bool>,
+                Box::new(Self::try_explode) as Box<dyn Fn(&Self) -> bool>,
                 Box::new(Self::try_split),
             ] {
                 operation_applied |= operation(self);
@@ -236,36 +263,41 @@ impl SnailfishNumber {
         }
     }
 
-    fn try_explode(self: &Rc<Self>) -> bool {
+    fn try_explode(&self) -> bool {
         self.explode_inner(0)
     }
 
-    fn explode_inner(self: &Rc<Self>, depth: usize) -> bool {
+    fn explode_inner(&self, depth: usize) -> bool {
+        eprintln!("explode_inner({})", depth);
         // handle the actual explosion case
         let mut did_explode = false;
         if depth == 4 {
-            if let Some(branch) = self.contents.borrow().as_branch() {
+            if let Some(branch) = self.branch() {
                 did_explode = true;
                 debug_assert!(
-                    branch.left.value_copied().is_some() && branch.right.value_copied().is_some(),
+                    branch.left.value().is_some() && branch.right.value().is_some(),
                     "problem statement promises that exploding values are always simple values"
                 );
 
-                if let Some(left) = self.left_leaf().and_then(|leaf| leaf.upgrade()) {
-                    let new_value = branch.left.value_copied().expect(
+                if let Some(left) = self.left_leaf() {
+                    let new_value = *branch.left.value().expect(
                         "problem statement promises that explosions only hit simple numbers",
-                    ) + left
-                        .value_copied()
+                    ) + *unsafe { &*left }
+                        .value()
                         .expect("left_leaf always produces a leaf");
-                    left.contents.replace(Contents::Leaf(new_value));
+                    unsafe { &*left }
+                        .contents
+                        .replace(Contents::Leaf(new_value));
                 }
-                if let Some(right) = self.right_leaf().and_then(|leaf| leaf.upgrade()) {
-                    let new_value = branch.right.value_copied().expect(
+                if let Some(right) = self.right_leaf() {
+                    let new_value = *branch.right.value().expect(
                         "problem statement promises that explosions only hit simple numbers",
-                    ) + right
-                        .value_copied()
+                    ) + *unsafe { &*right }
+                        .value()
                         .expect("right_leaf always produces a leaf");
-                    right.contents.replace(Contents::Leaf(new_value));
+                    unsafe { &*right }
+                        .contents
+                        .replace(Contents::Leaf(new_value));
                 }
             }
             if did_explode {
@@ -276,31 +308,31 @@ impl SnailfishNumber {
         // handle recursion by abusing short-circuit behavior:
         // if at any point something explodes, we return immediately instead of continuing to explode
         did_explode
-            || if let Some(branch) = self.contents.borrow().as_branch() {
+            || if let Contents::Branch(branch) = self.contents.borrow().deref() {
                 branch.left.explode_inner(depth + 1) || branch.right.explode_inner(depth + 1)
             } else {
                 false
             }
     }
 
-    fn try_split(self: &Rc<Self>) -> bool {
-        if let Some(value) = self.value_copied() {
-            if value >= 10 {
-                let left = Self::new_value(value / 2);
-                let right = Self::new_value(value / 2 + value % 2);
+    fn try_split(&self) -> bool {
+        if let Some(value) = self.value() {
+            if *value >= 10 {
+                let left = Box::new(Self::new_value(*value / 2));
+                let right = Box::new(Self::new_value(*value / 2 + *value % 2));
                 self.contents
                     .replace(Contents::Branch(Branch { left, right }));
                 return true;
             }
         }
-        if let Some(branch) = self.contents.borrow().as_branch() {
+        if let Some(branch) = self.branch() {
             branch.left.try_split() || branch.right.try_split()
         } else {
             false
         }
     }
 
-    fn magnitude(self: &Rc<Self>) -> u64 {
+    fn magnitude(&self) -> u64 {
         match self.contents.borrow().deref() {
             Contents::Leaf(value) => *value as u64,
             Contents::Branch(branch) => {
@@ -316,7 +348,6 @@ impl FromStr for SnailfishNumber {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         parser::SnailfishParser::new()
             .parse(s)
-            .map(|rc| Rc::try_unwrap(rc).expect("fresh rc has no other references"))
             .map_err(|err| err.map_token(|t| t.to_string()).into())
     }
 }
@@ -324,11 +355,7 @@ impl FromStr for SnailfishNumber {
 // known wrong, too low: 1094
 pub fn part1(input: &Path) -> Result<(), Error> {
     let sum = parse::<SnailfishNumber>(input)?
-        .map(Rc::new)
-        .reduce(|acc, item| {
-            acc.add(item)
-                .expect("all these numbers should be distinct and have no other references")
-        })
+        .reduce(|acc, item| acc.add(item))
         .ok_or(Error::NoSolution)?;
     println!("magnitude of snailfish sum: {}", sum.magnitude());
     Ok(())
@@ -353,14 +380,14 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
-    fn parse(s: &str) -> Rc<SnailfishNumber> {
-        Rc::new(s.parse().unwrap())
+    fn parse(s: &str) -> SnailfishNumber {
+        s.parse().unwrap()
     }
 
     #[test]
     fn addition_1() {
         assert_eq!(
-            parse("[1,2]").add(parse("[[3,4],5]")).unwrap(),
+            parse("[1,2]").add(parse("[[3,4],5]")),
             parse("[[1,2],[[3,4],5]]")
         );
     }
@@ -376,6 +403,7 @@ mod tests {
     #[case("[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]", "[[3,[2,[8,0]]],[9,[5,[7,0]]]]")]
     fn explode(#[case] input: &str, #[case] expect: &str) {
         let sfn = parse(input);
+        eprintln!("parsed");
         assert!(sfn.try_explode());
         assert_eq!(sfn, parse(expect));
     }
