@@ -291,10 +291,11 @@ impl SnailfishNumber {
     }
 
     fn try_split(&self) -> bool {
-        if let Some(value) = self.value() {
-            if *value >= 10 {
-                let left = Self::new_value(*value / 2);
-                let right = Self::new_value(*value / 2 + *value % 2);
+        let value = self.value().map(|ref_leaf| *ref_leaf);
+        if let Some(value) = value {
+            if value >= 10 {
+                let left = Self::new_value(value / 2);
+                let right = Self::new_value(value / 2 + value % 2);
                 self.contents
                     .replace(Contents::Branch(Branch { left, right }));
                 return true;
@@ -328,6 +329,7 @@ impl FromStr for Box<SnailfishNumber> {
 }
 
 // known wrong, too low: 1094
+// known wrong, too low: 2972
 pub fn part1(input: &Path) -> Result<(), Error> {
     let sum = parse::<Box<SnailfishNumber>>(input)?
         .reduce(|acc, item| acc.add(item))
@@ -353,6 +355,7 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aoclib::input::parse_str;
     use rstest::rstest;
 
     fn parse(s: &str) -> Box<SnailfishNumber> {
@@ -360,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn addition_1() {
+    fn simple_addition_example() {
         assert_eq!(
             parse("[1,2]").add(parse("[[3,4],5]")),
             parse("[[1,2],[[3,4],5]]")
@@ -400,5 +403,101 @@ mod tests {
         let sfn = parse(input);
         assert!(sfn.try_explode());
         assert_eq!(sfn, parse(expect));
+    }
+
+    #[rstest]
+    #[case("10", "[5,5]")]
+    #[case("11", "[5,6]")]
+    #[case("12", "[6,6]")]
+    fn split(#[case] input: &str, #[case] expect: &str) {
+        let sfn = parse(input);
+        assert!(sfn.try_split());
+        assert_eq!(sfn, parse(expect));
+    }
+
+    #[test]
+    fn multistage_addition_example() {
+        assert_eq!(
+            parse("[[[[4,3],4],4],[7,[[8,4],9]]]").add(parse("[1,1]")),
+            parse("[[[[0,7],4],[[7,8],[6,0]]],[8,1]]")
+        )
+    }
+
+    const SUM_1: &str = "
+[1,1]
+[2,2]
+[3,3]
+[4,4]
+    ";
+
+    const SUM_2: &str = "
+[1,1]
+[2,2]
+[3,3]
+[4,4]
+[5,5]
+    ";
+
+    const SUM_3: &str = "
+[1,1]
+[2,2]
+[3,3]
+[4,4]
+[5,5]
+[6,6]
+    ";
+
+    #[rstest]
+    #[case(SUM_1.trim(), "[[[[1,1],[2,2]],[3,3]],[4,4]]")]
+    #[case(SUM_2.trim(), "[[[[3,0],[5,3]],[4,4]],[5,5]]")]
+    #[case(SUM_3.trim(), "[[[[5,0],[7,4]],[5,5]],[6,6]]")]
+    fn example_sums(#[case] input: &str, #[case] expect: &str) {
+        assert_eq!(
+            parse_str::<Box<SnailfishNumber>>(input)
+                .unwrap()
+                .reduce(|acc, item| acc.add(item))
+                .unwrap(),
+            parse(expect)
+        );
+    }
+
+    #[rstest]
+    #[case("[9,1]", 29)]
+    #[case("[1,9]", 21)]
+    #[case("[[9,1],[1,9]]", 129)]
+    #[case("[[1,2],[[3,4],5]]", 143)]
+    #[case("[[[[0,7],4],[[7,8],[6,0]]],[8,1]]", 1384)]
+    #[case("[[[[1,1],[2,2]],[3,3]],[4,4]]", 445)]
+    #[case("[[[[3,0],[5,3]],[4,4]],[5,5]]", 791)]
+    #[case("[[[[5,0],[7,4]],[5,5]],[6,6]]", 1137)]
+    #[case("[[[[8,7],[7,7]],[[8,6],[7,7]]],[[[0,7],[6,6]],[8,7]]]", 3488)]
+    fn example_magnitudes(#[case] input: &str, #[case] expect: u64) {
+        assert_eq!(parse(input).magnitude(), expect);
+    }
+
+    #[test]
+    fn example_assignment() {
+        let assignment = "
+[[[0,[5,8]],[[1,7],[9,6]]],[[4,[1,2]],[[1,4],2]]]
+[[[5,[2,8]],4],[5,[[9,9],0]]]
+[6,[[[6,2],[5,6]],[[7,6],[4,7]]]]
+[[[6,[0,7]],[0,9]],[4,[9,[9,0]]]]
+[[[7,[6,4]],[3,[1,3]]],[[[5,5],1],9]]
+[[6,[[7,3],[3,2]]],[[[3,8],[5,7]],4]]
+[[[[5,4],[7,7]],8],[[8,3],8]]
+[[9,3],[[9,9],[6,[4,9]]]]
+[[2,[[7,7],7]],[[5,8],[[9,3],[0,2]]]]
+[[[[5,2],5],[8,[3,7]]],[[5,[7,5]],[4,4]]]
+        "
+        .trim();
+        let sum = parse_str::<Box<SnailfishNumber>>(assignment)
+            .unwrap()
+            .reduce(|acc, item| acc.add(item))
+            .unwrap();
+        assert_eq!(
+            sum,
+            parse("[[[[6,6],[7,6]],[[7,7],[7,0]]],[[[7,7],[7,7]],[[7,8],[9,9]]]]")
+        );
+        assert_eq!(sum.magnitude(), 4140);
     }
 }
