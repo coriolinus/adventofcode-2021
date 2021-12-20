@@ -54,7 +54,7 @@ impl<'a, T> Deref for RefLeaf<'a, T> {
 
     fn deref(&self) -> &Self::Target {
         if let Contents::Leaf(value) = self.0.deref() {
-            &value
+            value
         } else {
             panic!("RefLeaf is only constructed for leaf contents")
         }
@@ -68,7 +68,7 @@ impl<'a, T> Deref for RefBranch<'a, T> {
 
     fn deref(&self) -> &Self::Target {
         if let Contents::Branch(branch) = self.0.deref() {
-            &branch
+            branch
         } else {
             panic!("RefBranch is only constructed for branch contents")
         }
@@ -77,23 +77,21 @@ impl<'a, T> Deref for RefBranch<'a, T> {
 
 impl<T> Node<T> {
     /// Construct a new value node without a parent.
-    fn new_value(value: T) -> Self {
-        Self {
+    pub fn new_value(value: T) -> Box<Self> {
+        Box::new(Self {
             contents: RefCell::new(Contents::Leaf(value)),
             up: None,
-        }
+        })
     }
 
     /// Construct a new pair node without a parent.
     ///
     /// If either child had a parent or an external reference, this function will return `None`.
-    fn new_pair(left: Node<T>, right: Node<T>) -> Self {
-        let left = Box::new(left);
-        let right = Box::new(right);
-        let root = Self {
+    pub fn new_pair(left: Box<Node<T>>, right: Box<Node<T>>) -> Box<Self> {
+        let root = Box::new(Self {
             contents: RefCell::new(Contents::Branch(Branch { left, right })),
             up: None,
-        };
+        });
 
         // we have to encapsulate these pointers so the borrow checker doesn't complain
         {
@@ -105,7 +103,7 @@ impl<T> Node<T> {
             let right_ptr = &*root.branch().unwrap().right as *const Self as *mut Self;
             for ptr in [left_ptr, right_ptr] {
                 unsafe {
-                    (*ptr).up = Some(&root as _);
+                    (*ptr).up = Some(&*root as _);
                 }
             }
         }
@@ -163,10 +161,7 @@ impl<T> Node<T> {
     /// Return `Some(true)` when this node is its parent's left branch.
     ///
     /// `None` when this node is the root.
-    fn is_left(&self) -> Option<bool>
-    where
-        T: fmt::Debug,
-    {
+    fn is_left(&self) -> Option<bool> {
         let parent = self.parent()?;
         let left_child = &parent.branch().expect("parenthood implies branch").left;
         Some(std::ptr::eq(self as _, &**left_child as _))
@@ -175,10 +170,7 @@ impl<T> Node<T> {
     /// Return `Some(true)` when this node is its parent's right branch.
     ///
     /// `None` when this node is the root.
-    fn is_right(&self) -> Option<bool>
-    where
-        T: fmt::Debug,
-    {
+    fn is_right(&self) -> Option<bool> {
         self.is_left().map(|left| !left)
     }
 
@@ -188,10 +180,7 @@ impl<T> Node<T> {
     /// If this node is on the right, this produces the node's imediate parent.
     /// Otherwise, it will step upward arbitrarily far, seeking an ancestor
     /// whose direct descendent is on the right. It then returns that ancestor.
-    fn left_parent<'a>(&'a self) -> Option<&'a Node<T>>
-    where
-        T: fmt::Debug,
-    {
+    fn left_parent<'a>(&'a self) -> Option<&'a Node<T>> {
         let parent = self.parent()?;
         if self.is_right()? {
             Some(parent)
@@ -206,10 +195,7 @@ impl<T> Node<T> {
     /// If this node is on the left, this produces the node's immediate parent.
     /// Otherwise, it will step upwards arbitrarily far, seeking an ancestor
     /// whose direct descendent is on the left. It then returns that ancestor.
-    fn right_parent<'a>(&'a self) -> Option<&'a Node<T>>
-    where
-        T: fmt::Debug,
-    {
+    fn right_parent<'a>(&'a self) -> Option<&'a Node<T>> {
         let parent = self.parent()?;
 
         if self.is_left()? {
@@ -220,19 +206,13 @@ impl<T> Node<T> {
     }
 
     /// Return the next leaf left from this node.
-    fn left_leaf(&self) -> Option<*const Self>
-    where
-        T: fmt::Debug,
-    {
+    fn left_leaf(&self) -> Option<*const Self> {
         let parent = self.left_parent()?;
         Some(parent.branch()?.left.rightmost_grandchild())
     }
 
     /// Return the next leaf right from this node.
-    fn right_leaf(&self) -> Option<*const Self>
-    where
-        T: fmt::Debug,
-    {
+    fn right_leaf(&self) -> Option<*const Self> {
         let parent = self.right_parent()?;
         Some(parent.branch()?.right.leftmost_grandchild())
     }
@@ -241,7 +221,7 @@ impl<T> Node<T> {
 type SnailfishNumber = Node<u8>;
 
 impl SnailfishNumber {
-    pub fn add(self: Self, other: Self) -> Self {
+    pub fn add(self: Box<Self>, other: Box<Self>) -> Box<Self> {
         let sfn = SnailfishNumber::new_pair(self, other);
         sfn.reduce();
         sfn
@@ -268,7 +248,6 @@ impl SnailfishNumber {
     }
 
     fn explode_inner(&self, depth: usize) -> bool {
-        eprintln!("explode_inner({})", depth);
         // handle the actual explosion case
         let mut did_explode = false;
         if depth == 4 {
@@ -280,24 +259,20 @@ impl SnailfishNumber {
                 );
 
                 if let Some(left) = self.left_leaf() {
+                    // left reference must always be valid
+                    let left = unsafe { &*left };
                     let new_value = *branch.left.value().expect(
                         "problem statement promises that explosions only hit simple numbers",
-                    ) + *unsafe { &*left }
-                        .value()
-                        .expect("left_leaf always produces a leaf");
-                    unsafe { &*left }
-                        .contents
-                        .replace(Contents::Leaf(new_value));
+                    ) + *left.value().expect("left_leaf always produces a leaf");
+                    left.contents.replace(Contents::Leaf(new_value));
                 }
                 if let Some(right) = self.right_leaf() {
+                    // right reference must always be valid
+                    let right = unsafe { &*right };
                     let new_value = *branch.right.value().expect(
                         "problem statement promises that explosions only hit simple numbers",
-                    ) + *unsafe { &*right }
-                        .value()
-                        .expect("right_leaf always produces a leaf");
-                    unsafe { &*right }
-                        .contents
-                        .replace(Contents::Leaf(new_value));
+                    ) + *right.value().expect("right_leaf always produces a leaf");
+                    right.contents.replace(Contents::Leaf(new_value));
                 }
             }
             if did_explode {
@@ -318,8 +293,8 @@ impl SnailfishNumber {
     fn try_split(&self) -> bool {
         if let Some(value) = self.value() {
             if *value >= 10 {
-                let left = Box::new(Self::new_value(*value / 2));
-                let right = Box::new(Self::new_value(*value / 2 + *value % 2));
+                let left = Self::new_value(*value / 2);
+                let right = Self::new_value(*value / 2 + *value % 2);
                 self.contents
                     .replace(Contents::Branch(Branch { left, right }));
                 return true;
@@ -342,7 +317,7 @@ impl SnailfishNumber {
     }
 }
 
-impl FromStr for SnailfishNumber {
+impl FromStr for Box<SnailfishNumber> {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -354,7 +329,7 @@ impl FromStr for SnailfishNumber {
 
 // known wrong, too low: 1094
 pub fn part1(input: &Path) -> Result<(), Error> {
-    let sum = parse::<SnailfishNumber>(input)?
+    let sum = parse::<Box<SnailfishNumber>>(input)?
         .reduce(|acc, item| acc.add(item))
         .ok_or(Error::NoSolution)?;
     println!("magnitude of snailfish sum: {}", sum.magnitude());
@@ -380,7 +355,7 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
-    fn parse(s: &str) -> SnailfishNumber {
+    fn parse(s: &str) -> Box<SnailfishNumber> {
         s.parse().unwrap()
     }
 
@@ -390,6 +365,26 @@ mod tests {
             parse("[1,2]").add(parse("[[3,4],5]")),
             parse("[[1,2],[[3,4],5]]")
         );
+    }
+
+    fn check_legs<T>(node: &Node<T>) {
+        if let Some(branch) = node.branch() {
+            assert!(std::ptr::eq(node as _, branch.left.parent().unwrap() as _));
+            assert!(std::ptr::eq(node as _, branch.right.parent().unwrap() as _));
+            check_legs(&branch.left);
+            check_legs(&branch.right);
+        }
+    }
+
+    #[rstest]
+    #[case("[[[[[9,8],1],2],3],4]")]
+    #[case("[7,[6,[5,[4,[3,2]]]]]")]
+    #[case("[[6,[5,[4,[3,2]]]],1]")]
+    #[case("[[3,[2,[1,[7,3]]]],[6,[5,[4,[3,2]]]]]")]
+    #[case("[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]")]
+    fn test_parent_links(#[case] input: &str) {
+        let sfn = parse(input);
+        check_legs(&sfn);
     }
 
     #[rstest]
@@ -403,7 +398,6 @@ mod tests {
     #[case("[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]", "[[3,[2,[8,0]]],[9,[5,[7,0]]]]")]
     fn explode(#[case] input: &str, #[case] expect: &str) {
         let sfn = parse(input);
-        eprintln!("parsed");
         assert!(sfn.try_explode());
         assert_eq!(sfn, parse(expect));
     }

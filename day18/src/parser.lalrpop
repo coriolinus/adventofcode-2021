@@ -2,9 +2,9 @@ use super::SnailfishNumber;
 
 grammar;
 
-Leaf: SnailfishNumber = <s:r"[0-9]+"> => SnailfishNumber::new_value(s.parse().expect("all values should be valid u8"));
+Leaf: Box<SnailfishNumber> = <s:r"[0-9]+"> => SnailfishNumber::new_value(s.parse().expect("all values should be valid u8"));
 
-pub Snailfish: SnailfishNumber = {
+pub Snailfish: Box<SnailfishNumber> = {
     <Leaf> => <>,
     "[" <left:Snailfish> "," <right:Snailfish> "]" => SnailfishNumber::new_pair(left, right),
 };
