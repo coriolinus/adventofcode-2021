@@ -1,5 +1,6 @@
 use crate::Error;
 use aoclib::parse;
+use itertools::Itertools;
 use std::{path::Path, str::FromStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,7 +220,16 @@ pub fn part1(input: &Path) -> Result<(), Error> {
 }
 
 pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+    let numbers: Vec<SnailfishNumber> = parse(input)?.collect();
+    let max_magnitude = numbers
+        .iter()
+        .cartesian_product(numbers.iter())
+        .filter(|(a, b)| a != b)
+        .flat_map(|(a, b)| [a.clone().add(b.clone()), b.clone().add(a.clone())].into_iter())
+        .max_by_key(|snailfish| snailfish.magnitude())
+        .ok_or(Error::NoSolution)?;
+    println!("max magnitude pairwise sum: {}", max_magnitude.magnitude());
+    Ok(())
 }
 
 #[cfg(test)]

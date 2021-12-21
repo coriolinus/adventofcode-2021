@@ -371,8 +371,8 @@ pub fn part1(input: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn part2(input: &Path) -> Result<(), Error> {
-    unimplemented!("input file: {:?}", input)
+pub fn part2(_input: &Path) -> Result<(), Error> {
+    unimplemented!("the list-based implementation is much faster, so did part2 there")
 }
 
 #[derive(Debug, thiserror::Error)]
