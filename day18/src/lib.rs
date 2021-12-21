@@ -80,10 +80,18 @@ impl<T: PartialEq> PartialEq for Node<T> {
 
 impl<T> Node<T> {
     /// Construct a new value node without a parent.
-    pub fn new_value(value: T) -> Box<Self> {
+    pub fn new_orphan_value(value: T) -> Box<Self> {
         Box::new(Self {
             contents: RefCell::new(Contents::Leaf(value)),
             up: None,
+        })
+    }
+
+    /// Construct a new value node which has a parent.
+    pub fn new_value(value: T, parent: &Box<Self>) -> Box<Self> {
+        Box::new(Self {
+            contents: RefCell::new(Contents::Leaf(value)),
+            up: Some(&**parent as _),
         })
     }
 
@@ -219,6 +227,17 @@ impl<T> Node<T> {
         let parent = self.right_parent()?;
         Some(parent.branch()?.right.leftmost_grandchild())
     }
+
+    /// Check that all legs of this node have valid up pointers
+    #[cfg(test)]
+    fn check_legs(&self) {
+        if let Some(branch) = self.branch() {
+            assert!(std::ptr::eq(self as _, branch.left.parent().unwrap() as _));
+            assert!(std::ptr::eq(self as _, branch.right.parent().unwrap() as _));
+            branch.left.check_legs();
+            branch.right.check_legs();
+        }
+    }
 }
 
 type SnailfishNumber = Node<u8>;
@@ -230,12 +249,12 @@ impl SnailfishNumber {
         sfn
     }
 
-    fn reduce(&self) {
+    fn reduce(self: &Box<Self>) {
         let mut operation_applied = true;
         while operation_applied {
             operation_applied = false;
             for operation in [
-                Box::new(Self::try_explode) as Box<dyn Fn(&Self) -> bool>,
+                Box::new(Self::try_explode) as Box<dyn Fn(&Box<Self>) -> bool>,
                 Box::new(Self::try_split),
             ] {
                 operation_applied |= operation(self);
@@ -246,7 +265,7 @@ impl SnailfishNumber {
         }
     }
 
-    fn try_explode(&self) -> bool {
+    fn try_explode(self: &Box<Self>) -> bool {
         self.explode_inner(0)
     }
 
@@ -297,7 +316,7 @@ impl SnailfishNumber {
             .unwrap_or_default()
     }
 
-    fn try_split(&self) -> bool {
+    fn try_split(self: &Box<Self>) -> bool {
         // left branch
         if let Some(branch) = self.branch() {
             if branch.left.try_split() {
@@ -309,8 +328,8 @@ impl SnailfishNumber {
         let value = self.value().map(|ref_leaf| *ref_leaf);
         if let Some(value) = value {
             if value >= 10 {
-                let left = Self::new_value(value / 2);
-                let right = Self::new_value(value / 2 + value % 2);
+                let left = Self::new_value(value / 2, self);
+                let right = Self::new_value(value / 2 + value % 2, self);
                 self.contents
                     .replace(Contents::Branch(Branch { left, right }));
                 return true;
@@ -387,15 +406,6 @@ mod tests {
         );
     }
 
-    fn check_legs<T>(node: &Node<T>) {
-        if let Some(branch) = node.branch() {
-            assert!(std::ptr::eq(node as _, branch.left.parent().unwrap() as _));
-            assert!(std::ptr::eq(node as _, branch.right.parent().unwrap() as _));
-            check_legs(&branch.left);
-            check_legs(&branch.right);
-        }
-    }
-
     #[rstest]
     #[case("[[[[[9,8],1],2],3],4]")]
     #[case("[7,[6,[5,[4,[3,2]]]]]")]
@@ -404,7 +414,7 @@ mod tests {
     #[case("[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]")]
     fn test_parent_links(#[case] input: &str) {
         let sfn = parse(input);
-        check_legs(&sfn);
+        sfn.check_legs();
     }
 
     #[rstest]
@@ -416,6 +426,10 @@ mod tests {
         "[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]"
     )]
     #[case("[[3,[2,[8,0]]],[9,[5,[4,[3,2]]]]]", "[[3,[2,[8,0]]],[9,[5,[7,0]]]]")]
+    #[case(
+        "[[[[7,7],[7,0]],[[7,8],[8,7]]],[[[6,7],[6,[6,7]]],[[0,7],[17,0]]]]",
+        "[[[[7,7],[7,0]],[[7,8],[8,7]]],[[[6,7],[12,0]],[[7,7],[17,0]]]]"
+    )]
     fn explode(#[case] input: &str, #[case] expect: &str) {
         let sfn = parse(input);
         assert!(sfn.try_explode());

@@ -2,7 +2,7 @@ use super::SnailfishNumber;
 
 grammar;
 
-Leaf: Box<SnailfishNumber> = <s:r"[0-9]+"> => SnailfishNumber::new_value(s.parse().expect("all values should be valid u8"));
+Leaf: Box<SnailfishNumber> = <s:r"[0-9]+"> => SnailfishNumber::new_orphan_value(s.parse().expect("all values should be valid u8"));
 
 pub Snailfish: Box<SnailfishNumber> = {
     <Leaf> => <>,
