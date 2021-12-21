@@ -4,7 +4,7 @@ lalrpop_mod!(parser);
 #[cfg(feature = "list_impl")]
 pub mod list_impl;
 
-use std::{cell::RefCell, fmt, ops::Deref, path::Path, str::FromStr};
+use std::{fmt, path::Path, str::FromStr};
 
 use aoclib::parse;
 
@@ -33,42 +33,14 @@ impl<T: fmt::Debug> fmt::Debug for Contents<T> {
     }
 }
 
-struct RefLeaf<'a, T>(std::cell::Ref<'a, Contents<T>>);
-
-impl<'a, T> Deref for RefLeaf<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        if let Contents::Leaf(value) = self.0.deref() {
-            value
-        } else {
-            panic!("RefLeaf is only constructed for leaf contents")
-        }
-    }
-}
-
-struct RefBranch<'a, T>(std::cell::Ref<'a, Contents<T>>);
-
-impl<'a, T> Deref for RefBranch<'a, T> {
-    type Target = Branch<T>;
-
-    fn deref(&self) -> &Self::Target {
-        if let Contents::Branch(branch) = self.0.deref() {
-            branch
-        } else {
-            panic!("RefBranch is only constructed for branch contents")
-        }
-    }
-}
-
 pub struct Node<T> {
-    contents: RefCell<Contents<T>>,
+    contents: Contents<T>,
     up: Option<*const Node<T>>,
 }
 
 impl<T: fmt::Debug> fmt::Debug for Node<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.contents.borrow())
+        write!(f, "{:?}", self.contents)
     }
 }
 
@@ -82,7 +54,7 @@ impl<T> Node<T> {
     /// Construct a new value node without a parent.
     pub fn new_orphan_value(value: T) -> Box<Self> {
         Box::new(Self {
-            contents: RefCell::new(Contents::Leaf(value)),
+            contents: Contents::Leaf(value),
             up: None,
         })
     }
@@ -90,9 +62,16 @@ impl<T> Node<T> {
     /// Construct a new value node which has a parent.
     pub fn new_value(value: T, parent: &Box<Self>) -> Box<Self> {
         Box::new(Self {
-            contents: RefCell::new(Contents::Leaf(value)),
+            contents: Contents::Leaf(value),
             up: Some(&**parent as _),
         })
+    }
+
+    /// Use pointer trickery to enable internal mutation.
+    ///
+    /// Super unsafe, particularly if threads are involved. No checks are performed.
+    unsafe fn force_mutable(&self) -> &mut Self {
+        &mut *(self as *const Self as *mut Self)
     }
 
     /// Construct a new pair node without a parent.
@@ -100,7 +79,7 @@ impl<T> Node<T> {
     /// If either child had a parent or an external reference, this function will return `None`.
     pub fn new_pair(left: Box<Node<T>>, right: Box<Node<T>>) -> Box<Self> {
         let root = Box::new(Self {
-            contents: RefCell::new(Contents::Branch(Branch { left, right })),
+            contents: Contents::Branch(Branch { left, right }),
             up: None,
         });
 
@@ -123,18 +102,18 @@ impl<T> Node<T> {
     }
 
     /// Return the value of this node if this is a value node.
-    fn value(&self) -> Option<RefLeaf<'_, T>> {
-        match self.contents.borrow().deref() {
-            Contents::Leaf(_) => Some(RefLeaf(self.contents.borrow())),
+    fn value(&self) -> Option<&T> {
+        match &self.contents {
+            Contents::Leaf(value) => Some(value),
             Contents::Branch(_) => None,
         }
     }
 
     /// Return the branch of this node if this is a branch node.
-    fn branch(&self) -> Option<RefBranch<'_, T>> {
-        match self.contents.borrow().deref() {
+    fn branch(&self) -> Option<&Branch<T>> {
+        match &self.contents {
             Contents::Leaf(_) => None,
-            Contents::Branch(_) => Some(RefBranch(self.contents.borrow())),
+            Contents::Branch(branch) => Some(branch),
         }
     }
 
@@ -144,7 +123,7 @@ impl<T> Node<T> {
     ///
     /// Returns `self` if `self` is already a leaf.
     fn leftmost_grandchild(&self) -> *const Self {
-        match self.contents.borrow().deref() {
+        match &self.contents {
             Contents::Leaf(_) => self as _,
             Contents::Branch(branch) => branch.left.leftmost_grandchild(),
         }
@@ -156,7 +135,7 @@ impl<T> Node<T> {
     ///
     /// Returns `self` if `self` is already a leaf.
     fn rightmost_grandchild(&self) -> *const Self {
-        match self.contents.borrow().deref() {
+        match &self.contents {
             Contents::Leaf(_) => self as _,
             Contents::Branch(branch) => branch.right.rightmost_grandchild(),
         }
@@ -289,23 +268,23 @@ impl SnailfishNumber {
 
                 if let Some(left) = self.left_leaf() {
                     // left reference must always be valid
-                    let left = unsafe { &*left };
+                    let left = unsafe { (&*left).force_mutable() };
                     let new_value = *branch.left.value().expect(
                         "problem statement promises that explosions only hit simple numbers",
                     ) + *left.value().expect("left_leaf always produces a leaf");
-                    left.contents.replace(Contents::Leaf(new_value));
+                    left.contents = Contents::Leaf(new_value);
                 }
                 if let Some(right) = self.right_leaf() {
                     // right reference must always be valid
-                    let right = unsafe { &*right };
+                    let right = unsafe { (&*right).force_mutable() };
                     let new_value = *branch.right.value().expect(
                         "problem statement promises that explosions only hit simple numbers",
                     ) + *right.value().expect("right_leaf always produces a leaf");
-                    right.contents.replace(Contents::Leaf(new_value));
+                    right.contents = Contents::Leaf(new_value);
                 }
             }
             if did_explode {
-                self.contents.replace(Contents::Leaf(0));
+                unsafe { self.force_mutable() }.contents = Contents::Leaf(0);
                 return true;
             }
         }
@@ -330,8 +309,7 @@ impl SnailfishNumber {
             if value >= 10 {
                 let left = Self::new_value(value / 2, self);
                 let right = Self::new_value(value / 2 + value % 2, self);
-                self.contents
-                    .replace(Contents::Branch(Branch { left, right }));
+                unsafe { self.force_mutable() }.contents = Contents::Branch(Branch { left, right });
                 return true;
             }
         }
@@ -342,7 +320,7 @@ impl SnailfishNumber {
     }
 
     fn magnitude(&self) -> u64 {
-        match self.contents.borrow().deref() {
+        match &self.contents {
             Contents::Leaf(value) => *value as u64,
             Contents::Branch(branch) => {
                 (branch.left.magnitude() * 3) + (branch.right.magnitude() * 2)
