@@ -1,9 +1,12 @@
 use aoclib::{config::Config, website::get_input};
+#[cfg(feature = "list_impl")]
+use day18::list_impl::{part1, part2};
+#[cfg(not(feature = "list_impl"))]
 use day18::{part1, part2};
 
 use color_eyre::eyre::Result;
-use structopt::StructOpt;
 use std::path::PathBuf;
+use structopt::StructOpt;
 
 const YEAR: u32 = 2021;
 const DAY: u8 = 18;

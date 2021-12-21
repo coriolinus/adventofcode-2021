@@ -17,3 +17,7 @@ lalrpop = "0.19.6"
 
 [dev-dependencies]
 rstest = "0.10.0"
+
+[features]
+default = []
+list_impl = []

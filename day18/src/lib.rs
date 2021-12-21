@@ -1,6 +1,9 @@
 use lalrpop_util::lalrpop_mod;
 lalrpop_mod!(parser);
 
+#[cfg(feature = "list_impl")]
+pub mod list_impl;
+
 use std::{cell::RefCell, fmt, ops::Deref, path::Path, str::FromStr};
 
 use aoclib::parse;
@@ -30,23 +33,6 @@ impl<T: fmt::Debug> fmt::Debug for Contents<T> {
     }
 }
 
-pub struct Node<T> {
-    contents: RefCell<Contents<T>>,
-    up: Option<*const Node<T>>,
-}
-
-impl<T: fmt::Debug> fmt::Debug for Node<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.contents.borrow())
-    }
-}
-
-impl<T: PartialEq> PartialEq for Node<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.contents == other.contents
-    }
-}
-
 struct RefLeaf<'a, T>(std::cell::Ref<'a, Contents<T>>);
 
 impl<'a, T> Deref for RefLeaf<'a, T> {
@@ -72,6 +58,23 @@ impl<'a, T> Deref for RefBranch<'a, T> {
         } else {
             panic!("RefBranch is only constructed for branch contents")
         }
+    }
+}
+
+pub struct Node<T> {
+    contents: RefCell<Contents<T>>,
+    up: Option<*const Node<T>>,
+}
+
+impl<T: fmt::Debug> fmt::Debug for Node<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.contents.borrow())
+    }
+}
+
+impl<T: PartialEq> PartialEq for Node<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.contents == other.contents
     }
 }
 
@@ -248,7 +251,14 @@ impl SnailfishNumber {
     }
 
     fn explode_inner(&self, depth: usize) -> bool {
-        // handle the actual explosion case
+        // left branch first
+        if let Some(branch) = self.branch() {
+            if branch.left.explode_inner(depth + 1) {
+                return true;
+            }
+        }
+
+        // oops, what if it's time for _us_ to explode?
         let mut did_explode = false;
         if depth == 4 {
             if let Some(branch) = self.branch() {
@@ -277,20 +287,25 @@ impl SnailfishNumber {
             }
             if did_explode {
                 self.contents.replace(Contents::Leaf(0));
+                return true;
             }
         }
 
-        // handle recursion by abusing short-circuit behavior:
-        // if at any point something explodes, we return immediately instead of continuing to explode
-        did_explode
-            || if let Contents::Branch(branch) = self.contents.borrow().deref() {
-                branch.left.explode_inner(depth + 1) || branch.right.explode_inner(depth + 1)
-            } else {
-                false
-            }
+        // right branch
+        self.branch()
+            .map(|branch| branch.right.explode_inner(depth + 1))
+            .unwrap_or_default()
     }
 
     fn try_split(&self) -> bool {
+        // left branch
+        if let Some(branch) = self.branch() {
+            if branch.left.try_split() {
+                return true;
+            }
+        }
+
+        // try this value
         let value = self.value().map(|ref_leaf| *ref_leaf);
         if let Some(value) = value {
             if value >= 10 {
@@ -301,11 +316,10 @@ impl SnailfishNumber {
                 return true;
             }
         }
-        if let Some(branch) = self.branch() {
-            branch.left.try_split() || branch.right.try_split()
-        } else {
-            false
-        }
+
+        self.branch()
+            .map(|branch| branch.right.try_split())
+            .unwrap_or_default()
     }
 
     fn magnitude(&self) -> u64 {
@@ -350,6 +364,9 @@ pub enum Error {
     ParseError(#[from] lalrpop_util::ParseError<usize, String, &'static str>),
     #[error("no solution found")]
     NoSolution,
+    #[cfg(feature = "list_impl")]
+    #[error("failed to parse")]
+    ListParseError,
 }
 
 #[cfg(test)]
@@ -477,6 +494,10 @@ mod tests {
 
     #[test]
     fn example_assignment() {
+        let expect = parse("[[[[6,6],[7,6]],[[7,7],[7,0]]],[[[7,7],[7,7]],[[7,8],[9,9]]]]");
+        const EXPECT_MAGNITUDE: u64 = 4140;
+        assert_eq!(expect.magnitude(), EXPECT_MAGNITUDE);
+
         let assignment = "
 [[[0,[5,8]],[[1,7],[9,6]]],[[4,[1,2]],[[1,4],2]]]
 [[[5,[2,8]],4],[5,[[9,9],0]]]
@@ -494,10 +515,17 @@ mod tests {
             .unwrap()
             .reduce(|acc, item| acc.add(item))
             .unwrap();
-        assert_eq!(
-            sum,
-            parse("[[[[6,6],[7,6]],[[7,7],[7,0]]],[[[7,7],[7,7]],[[7,8],[9,9]]]]")
-        );
-        assert_eq!(sum.magnitude(), 4140);
+        assert_eq!(sum, expect);
+        assert_eq!(sum.magnitude(), EXPECT_MAGNITUDE);
+    }
+
+    #[rstest]
+    #[case(
+        "[[[0,[5,8]],[[1,7],[9,6]]],[[4,[1,2]],[[1,4],2]]]",
+        "[[[5,[2,8]],4],[5,[[9,9],0]]]",
+        ""
+    )]
+    fn constructed_cases(#[case] acc: &str, #[case] elem: &str, #[case] expect: &str) {
+        assert_eq!(parse(acc).add(parse(elem)), parse(expect));
     }
 }
