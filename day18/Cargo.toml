@@ -9,7 +9,7 @@ aoclib = { git = "https://github.com/coriolinus/aoclib.git" }
 color-eyre = "0.5.10"
 itertools = "0.10.3"
 lalrpop-util = "0.19.6"
-regex = "1.5.4"
+regex = "1.5.5"
 structopt = "0.3.21"
 thiserror = "1.0.22"
 
